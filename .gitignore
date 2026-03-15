@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+# Virtualenv
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Release artifacts
+package/
+package.zip
+
+# Updater build artifacts
+assets/updates/build/
+assets/updates/dist/
+assets/updates/*.spec
+
+# Windows
+Thumbs.db
+Desktop.ini
