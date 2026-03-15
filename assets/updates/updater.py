@@ -89,8 +89,20 @@ def rename_dir_with_retry(src: Path, dst: Path, base_log: Path, retries=RENAME_R
 
 
 def relaunch_app(app_exe: Path, app_dir: Path, base_log: Path) -> bool:
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = (
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        )
+
     try:
-        subprocess.Popen([str(app_exe)], cwd=str(app_dir), shell=False)
+        subprocess.Popen(
+            [str(app_exe)],
+            cwd=str(app_dir),
+            shell=False,
+            creationflags=creationflags
+        )
         write_log(base_log, f"[REOPEN OK] {app_exe}")
         return True
     except Exception as e:
@@ -165,12 +177,12 @@ def main():
         rollback(app_dir, backup_dir, base_log)
         sys.exit(6)
 
+    if not relaunch_app(new_app_exe, app_dir, base_log):
+        sys.exit(7)
+
     if backup_dir.exists():
         remove_dir_with_retry(backup_dir, base_log)
         write_log(base_log, f"[CLEAN OK] {backup_dir}")
-
-    if not relaunch_app(new_app_exe, app_dir, base_log):
-        sys.exit(7)
 
     if source_dir.exists():
         remove_dir_with_retry(source_dir, base_log)
