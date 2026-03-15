@@ -13,7 +13,11 @@ from access import TelaAcesso
 from shell import MainShell
 
 from app_info import APP_VERSION, UPDATE_MANIFEST_URL
-from update_service import check_for_update, download_update_package
+from update_service import (
+    check_for_update,
+    download_update_package,
+    extract_update_package,
+)
 from update_dialog import UpdateDialog
 from updater_client import iniciar_instalacao_update
 
@@ -63,11 +67,11 @@ def verificar_atualizacao(shell):
             progresso.show()
             QApplication.processEvents()
 
-            def on_progress(recebido, total):
+            def on_download_progress(recebido, total):
                 if total > 0:
-                    pct = int((recebido / total) * 100)
-                    progresso.setValue(min(pct, 100))
-                    progresso.setLabelText(f"Baixando atualização... {pct}%")
+                    pct = int((recebido / total) * 50)  # download = 0 a 50
+                    progresso.setValue(min(pct, 50))
+                    progresso.setLabelText(f"Baixando atualização... {int((recebido / total) * 100)}%")
                 else:
                     progresso.setValue(0)
                     progresso.setLabelText("Baixando atualização...")
@@ -76,14 +80,30 @@ def verificar_atualizacao(shell):
             zip_path = download_update_package(
                 url=info["url"],
                 expected_sha256=info.get("sha256", ""),
-                progress_callback=on_progress
+                progress_callback=on_download_progress
+            )
+
+            def on_extract_progress(done_bytes, total_bytes, current_name):
+                pct_extract = int((done_bytes / total_bytes) * 50)  # extração = 50 a 100
+                pct_total = 50 + pct_extract
+                progresso.setValue(min(pct_total, 100))
+                progresso.setLabelText(f"Preparando instalação... {current_name}")
+                QApplication.processEvents()
+
+            extracted_dir = extract_update_package(
+                zip_path=zip_path,
+                progress_callback=on_extract_progress
             )
 
             progresso.setValue(100)
-            progresso.setLabelText("Instalando atualização e reiniciando o aplicativo...")
+            progresso.setLabelText("Concluindo preparação da atualização...")
             QApplication.processEvents()
 
-            iniciar_instalacao_update(zip_path, parent=shell)
+            iniciar_instalacao_update(extracted_dir, parent=shell)
+
+            progresso.close()
+            QApplication.processEvents()
+
             shell.close()
             QApplication.processEvents()
             QApplication.instance().quit()

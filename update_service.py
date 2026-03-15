@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import hashlib
+import json
+import shutil
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
-import json
 
 import requests
 
@@ -14,7 +16,7 @@ from app_info import APP_VERSION, UPDATE_MANIFEST_URL
 
 def parse_version(version_str: str):
     try:
-        return tuple(int(x) for x in version_str.strip().split("."))
+        return tuple(int(x) for x in str(version_str).strip().split("."))
     except Exception:
         return (0, 0, 0)
 
@@ -31,6 +33,10 @@ def get_updates_dir() -> Path:
     return p
 
 
+def get_updater_exe_path() -> Path:
+    return get_updates_dir() / "updater.exe"
+
+
 def check_for_update(timeout=10):
     result = {
         "update_available": False,
@@ -44,10 +50,9 @@ def check_for_update(timeout=10):
     }
 
     try:
-
-
         resp = requests.get(UPDATE_MANIFEST_URL, timeout=timeout)
         resp.raise_for_status()
+
         manifest = json.loads(resp.content.decode("utf-8-sig"))
 
         remote_version = str(manifest.get("version", "")).strip()
@@ -81,7 +86,7 @@ def sha256_file(path: Path) -> str:
 
 def download_update_package(url: str, expected_sha256: str = "", progress_callback=None) -> Path:
     """
-    Baixa o zip da atualização para %TEMP% e retorna o caminho do arquivo.
+    Baixa o ZIP da atualização para %TEMP% e retorna o caminho do arquivo.
     progress_callback(recebido_bytes, total_bytes)
     """
     tmp_dir = Path(tempfile.gettempdir()) / "vivo_fiscal_suite_updates"
@@ -99,6 +104,7 @@ def download_update_package(url: str, expected_sha256: str = "", progress_callba
             for chunk in r.iter_content(chunk_size=1024 * 256):
                 if not chunk:
                     continue
+
                 f.write(chunk)
                 recebido += len(chunk)
 
@@ -113,5 +119,40 @@ def download_update_package(url: str, expected_sha256: str = "", progress_callba
     return zip_path
 
 
-def get_updater_exe_path() -> Path:
-    return get_updates_dir() / "updater.exe"
+def extract_update_package(zip_path: Path, progress_callback=None) -> Path:
+    """
+    Extrai o pacote para %TEMP% com progresso real.
+    progress_callback(done_bytes, total_bytes, current_name)
+
+    Retorna a pasta fonte já pronta para instalação:
+    - se existir 'package/', retorna ela
+    - senão, retorna a raiz extraída
+    """
+    zip_path = Path(zip_path).resolve()
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Pacote ZIP não encontrado: {zip_path}")
+
+    extract_root = Path(tempfile.gettempdir()) / "vivo_fiscal_suite_prepared"
+
+    if extract_root.exists():
+        shutil.rmtree(extract_root, ignore_errors=True)
+
+    extract_root.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        infos = zf.infolist()
+        total_bytes = sum(max(i.file_size, 0) for i in infos) or 1
+        done_bytes = 0
+
+        for info in infos:
+            zf.extract(info, extract_root)
+            done_bytes += max(info.file_size, 0)
+
+            if progress_callback:
+                progress_callback(done_bytes, total_bytes, info.filename)
+
+    package_dir = extract_root / "package"
+    if package_dir.exists():
+        return package_dir
+
+    return extract_root
