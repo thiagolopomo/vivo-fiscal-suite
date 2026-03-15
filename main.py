@@ -84,6 +84,8 @@ def verificar_atualizacao(shell):
             QApplication.processEvents()
 
             iniciar_instalacao_update(zip_path, parent=shell)
+            shell.close()
+            QApplication.processEvents()
             QApplication.instance().quit()
 
         except Exception as e:
