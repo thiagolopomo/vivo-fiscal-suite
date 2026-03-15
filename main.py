@@ -12,7 +12,7 @@ from splash import SplashScreen
 from access import TelaAcesso
 from shell import MainShell
 
-from app_info import APP_VERSION
+from app_info import APP_VERSION, UPDATE_MANIFEST_URL
 from update_service import check_for_update, download_update_package
 from update_dialog import UpdateDialog
 from updater_client import iniciar_instalacao_update
@@ -20,8 +20,6 @@ from updater_client import iniciar_instalacao_update
 
 def verificar_atualizacao(shell):
     from PySide6.QtWidgets import QMessageBox, QProgressDialog, QApplication
-    from PySide6.QtCore import Qt
-    from app_info import UPDATE_MANIFEST_URL, APP_VERSION
 
     info = check_for_update()
 
@@ -82,7 +80,7 @@ def verificar_atualizacao(shell):
             )
 
             progresso.setValue(100)
-            progresso.setLabelText("Preparando instalação...")
+            progresso.setLabelText("Instalando atualização e reiniciando o aplicativo...")
             QApplication.processEvents()
 
             iniciar_instalacao_update(zip_path, parent=shell)
@@ -120,7 +118,6 @@ def main():
             )
             shell.show()
 
-            # checa atualização depois que a shell abrir
             QTimer.singleShot(700, lambda: verificar_atualizacao(shell))
         else:
             app.quit()

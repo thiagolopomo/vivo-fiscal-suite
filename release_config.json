@@ -1,6 +1,6 @@
-﻿{
-    "version":  "4.0.0",
-    "notes":  "Descrição da mudança",
+{
+    "version":  "4.0.3",
+    "notes":  "teste update",
     "mandatory":  false,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"

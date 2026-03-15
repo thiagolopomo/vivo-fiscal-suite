@@ -5,6 +5,7 @@ import hashlib
 import sys
 import tempfile
 from pathlib import Path
+import json
 
 import requests
 
@@ -43,9 +44,11 @@ def check_for_update(timeout=10):
     }
 
     try:
+
+
         resp = requests.get(UPDATE_MANIFEST_URL, timeout=timeout)
         resp.raise_for_status()
-        manifest = resp.json()
+        manifest = json.loads(resp.content.decode("utf-8-sig"))
 
         remote_version = str(manifest.get("version", "")).strip()
         mandatory = bool(manifest.get("mandatory", False))

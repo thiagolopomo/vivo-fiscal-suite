@@ -5,8 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QMessageBox
-
 from update_service import get_base_dir, get_updater_exe_path
 
 
@@ -25,16 +23,15 @@ def iniciar_instalacao_update(zip_path: Path, parent=None):
         # durante teste em .py
         app_exe = Path(sys.executable).resolve()
 
-    subprocess.Popen([
-        str(updater_exe),
-        "--zip", str(zip_path),
-        "--app-dir", str(base_dir),
-        "--app-exe", str(app_exe),
-    ])
+    zip_path = Path(zip_path).resolve()
 
-    QMessageBox.information(
-        parent,
-        "Atualização",
-        "A atualização será instalada agora.\n\n"
-        "O aplicativo será fechado e reaberto automaticamente."
+    subprocess.Popen(
+        [
+            str(updater_exe),
+            "--zip", str(zip_path),
+            "--app-dir", str(base_dir),
+            "--app-exe", str(app_exe),
+        ],
+        cwd=str(base_dir),
+        shell=False
     )

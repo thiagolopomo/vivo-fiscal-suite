@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 _cfg_path = Path(__file__).with_name("release_config.json")
-_cfg = json.loads(_cfg_path.read_text(encoding="utf-8"))
+_cfg = json.loads(_cfg_path.read_text(encoding="utf-8-sig"))
 
 APP_NAME = "VIVO Fiscal Suite"
 APP_VERSION = _cfg["version"]

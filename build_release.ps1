@@ -18,15 +18,29 @@ function Get-FileSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLower()
 }
 
-$ProjectRoot = "C:\Users\ThiagoLopomo\Documents\Exes Vivo\app_vivo"
+function Write-Utf8NoBom([string]$Path, [string]$Content) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        $fullPath = $Path
+    }
+    else {
+        $fullPath = Join-Path $ProjectRoot $Path
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($fullPath, $Content, $utf8NoBom)
+}
+
+$ProjectRoot = $PSScriptRoot
 Set-Location $ProjectRoot
 
-if (!(Test-Path ".\.venv\Scripts\Activate.ps1")) {
-    throw "Virtualenv não encontrada em .\.venv"
+if (Test-Path ".\.venv\Scripts\Activate.ps1") {
+    . .\.venv\Scripts\Activate.ps1
 }
-.\.venv\Scripts\Activate.ps1
+else {
+    Write-Host "Aviso: .venv local não encontrada. Usando o Python/ambiente já ativo." -ForegroundColor Yellow
+}
 
-$configPath = ".\release_config.json"
+$configPath = Join-Path $ProjectRoot "release_config.json"
 if (!(Test-Path $configPath)) {
     throw "release_config.json não encontrado."
 }
@@ -36,14 +50,17 @@ $config.version = $Version
 if ($Notes -ne "") { $config.notes = $Notes }
 $config.mandatory = $Mandatory
 
-$config | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $configPath
+Write-Step "Atualizando release_config.json"
+$jsonConfig = $config | ConvertTo-Json -Depth 10
+Write-Utf8NoBom $configPath $jsonConfig
 
 Write-Step "Gerando app_version.json"
-@"
+$appVersionContent = @"
 {
   "version": "$($config.version)"
 }
-"@ | Set-Content -Encoding UTF8 ".\app_version.json"
+"@
+Write-Utf8NoBom ".\app_version.json" $appVersionContent
 
 Write-Step "Compilando updater"
 Set-Location ".\assets\updates"
@@ -114,7 +131,7 @@ $sha256 = Get-FileSha256 ".\package.zip"
 $packageUrl = "https://github.com/$($config.repo_owner)/$($config.repo_name)/releases/download/v$($config.version)/package.zip"
 
 Write-Step "Gerando version.json"
-@"
+$versionContent = @"
 {
   "version": "$($config.version)",
   "mandatory": $($config.mandatory.ToString().ToLower()),
@@ -122,7 +139,8 @@ Write-Step "Gerando version.json"
   "url": "$packageUrl",
   "sha256": "$sha256"
 }
-"@ | Set-Content -Encoding UTF8 ".\version.json"
+"@
+Write-Utf8NoBom ".\version.json" $versionContent
 
 Write-Step "Build finalizado"
 Write-Host "Versão: $($config.version)" -ForegroundColor Green
