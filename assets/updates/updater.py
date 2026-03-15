@@ -12,6 +12,8 @@ from pathlib import Path
 
 RENAME_RETRIES = 40
 RENAME_DELAY = 0.5
+REMOVE_RETRIES = 20
+REMOVE_DELAY = 0.8
 
 
 def write_log(base: Path, msg: str):
@@ -59,6 +61,19 @@ def wait_for_pid_exit(pid: int, base_log: Path, timeout=60.0, delay=0.5) -> bool
     return not pid_exists(pid)
 
 
+def remove_dir_with_retry(path: Path, base_log: Path, retries=REMOVE_RETRIES, delay=REMOVE_DELAY) -> bool:
+    for i in range(1, retries + 1):
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+            write_log(base_log, f"[REMOVE OK] {path}")
+            return True
+        except Exception as e:
+            write_log(base_log, f"[REMOVE RETRY {i}/{retries}] {path} -> {repr(e)}")
+            time.sleep(delay)
+    return not path.exists()
+
+
 def rename_dir_with_retry(src: Path, dst: Path, base_log: Path, retries=RENAME_RETRIES, delay=RENAME_DELAY) -> bool:
     for i in range(1, retries + 1):
         try:
@@ -81,6 +96,19 @@ def relaunch_app(app_exe: Path, app_dir: Path, base_log: Path) -> bool:
     except Exception as e:
         write_log(base_log, f"[REOPEN ERROR] {repr(e)}")
         return False
+
+
+def rollback(app_dir: Path, backup_dir: Path, base_log: Path):
+    write_log(base_log, "[ROLLBACK] iniciando restauração")
+
+    if app_dir.exists():
+        remove_dir_with_retry(app_dir, base_log)
+
+    if backup_dir.exists():
+        if rename_dir_with_retry(backup_dir, app_dir, base_log):
+            write_log(base_log, "[ROLLBACK OK] backup restaurado")
+        else:
+            write_log(base_log, "[ROLLBACK ERROR] falha ao restaurar backup")
 
 
 def main():
@@ -115,25 +143,37 @@ def main():
             sys.exit(2)
 
     if backup_dir.exists():
-        shutil.rmtree(backup_dir, ignore_errors=True)
+        if not remove_dir_with_retry(backup_dir, base_log):
+            write_log(base_log, "[FATAL] não foi possível remover backup anterior")
+            sys.exit(3)
 
     if not rename_dir_with_retry(app_dir, backup_dir, base_log):
         write_log(base_log, "[FATAL] não foi possível mover a pasta atual")
-        sys.exit(3)
+        sys.exit(4)
 
-    shutil.copytree(source_dir, app_dir)
-    write_log(base_log, f"[COPY OK] {source_dir} -> {app_dir}")
+    try:
+        shutil.copytree(source_dir, app_dir)
+        write_log(base_log, f"[COPY OK] {source_dir} -> {app_dir}")
+    except Exception as e:
+        write_log(base_log, f"[COPY ERROR] {repr(e)}")
+        rollback(app_dir, backup_dir, base_log)
+        sys.exit(5)
 
     new_app_exe = app_dir / exe_name
     if not new_app_exe.exists():
         write_log(base_log, "[FATAL] main.exe não encontrado após cópia")
-        sys.exit(4)
+        rollback(app_dir, backup_dir, base_log)
+        sys.exit(6)
 
-    shutil.rmtree(backup_dir, ignore_errors=True)
-    write_log(base_log, f"[CLEAN OK] {backup_dir}")
+    if backup_dir.exists():
+        remove_dir_with_retry(backup_dir, base_log)
+        write_log(base_log, f"[CLEAN OK] {backup_dir}")
 
     if not relaunch_app(new_app_exe, app_dir, base_log):
-        sys.exit(5)
+        sys.exit(7)
+
+    if source_dir.exists():
+        remove_dir_with_retry(source_dir, base_log)
 
     sys.exit(0)
 
