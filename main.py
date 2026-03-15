@@ -27,24 +27,11 @@ def verificar_atualizacao(shell):
 
     info = check_for_update()
 
-    QMessageBox.information(
-        shell,
-        "DEBUG UPDATE",
-        f"APP_VERSION = {APP_VERSION}\n"
-        f"UPDATE_MANIFEST_URL = {UPDATE_MANIFEST_URL}\n\n"
-        f"INFO = {info}"
-    )
-
     if info.get("error"):
         QMessageBox.critical(shell, "Erro no update", str(info["error"]))
         return
 
     if not info.get("update_available"):
-        QMessageBox.information(
-            shell,
-            "Sem atualização",
-            f"Atual: {info.get('current_version')} | Remota: {info.get('remote_version')}"
-        )
         return
 
     dlg = UpdateDialog(

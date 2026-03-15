@@ -25,6 +25,26 @@ def write_log(base: Path, msg: str):
         pass
 
 
+def mark_ready(ready_file: Path | None):
+    if not ready_file:
+        return
+    try:
+        ready_file.parent.mkdir(parents=True, exist_ok=True)
+        ready_file.write_text("ready", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def remove_ready(ready_file: Path | None):
+    if not ready_file:
+        return
+    try:
+        if ready_file.exists():
+            ready_file.unlink()
+    except Exception:
+        pass
+
+
 def pid_exists(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -46,7 +66,7 @@ def pid_exists(pid: int) -> bool:
         return False
 
 
-def wait_for_pid_exit(pid: int, base_log: Path, timeout=60.0, delay=0.5) -> bool:
+def wait_for_pid_exit(pid: int, base_log: Path, timeout=60.0, delay=0.2) -> bool:
     if pid <= 0:
         return True
 
@@ -129,12 +149,14 @@ def main():
     parser.add_argument("--app-dir", required=True)
     parser.add_argument("--app-exe", required=True)
     parser.add_argument("--wait-pid", type=int, default=0)
+    parser.add_argument("--ready-file", default="")
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir).resolve()
     app_dir = Path(args.app_dir).resolve()
     exe_name = Path(args.app_exe).name or "main.exe"
     wait_pid = int(args.wait_pid or 0)
+    ready_file = Path(args.ready_file).resolve() if args.ready_file else None
 
     base_log = app_dir.parent
     backup_dir = app_dir.parent / f"{app_dir.name}_backup"
@@ -144,23 +166,32 @@ def main():
     write_log(base_log, f"[START] app_dir={app_dir}")
     write_log(base_log, f"[START] exe_name={exe_name}")
     write_log(base_log, f"[START] wait_pid={wait_pid}")
+    if ready_file:
+        write_log(base_log, f"[START] ready_file={ready_file}")
+
+    # Sinaliza imediatamente: "updater assumiu"
+    mark_ready(ready_file)
 
     if not source_dir.exists():
         write_log(base_log, "[FATAL] source_dir não encontrado")
+        remove_ready(ready_file)
         sys.exit(1)
 
     if wait_pid > 0:
         if not wait_for_pid_exit(wait_pid, base_log):
             write_log(base_log, f"[FATAL] PID {wait_pid} não encerrou")
+            remove_ready(ready_file)
             sys.exit(2)
 
     if backup_dir.exists():
         if not remove_dir_with_retry(backup_dir, base_log):
             write_log(base_log, "[FATAL] não foi possível remover backup anterior")
+            remove_ready(ready_file)
             sys.exit(3)
 
     if not rename_dir_with_retry(app_dir, backup_dir, base_log):
         write_log(base_log, "[FATAL] não foi possível mover a pasta atual")
+        remove_ready(ready_file)
         sys.exit(4)
 
     try:
@@ -169,16 +200,22 @@ def main():
     except Exception as e:
         write_log(base_log, f"[COPY ERROR] {repr(e)}")
         rollback(app_dir, backup_dir, base_log)
+        remove_ready(ready_file)
         sys.exit(5)
 
     new_app_exe = app_dir / exe_name
     if not new_app_exe.exists():
         write_log(base_log, "[FATAL] main.exe não encontrado após cópia")
         rollback(app_dir, backup_dir, base_log)
+        remove_ready(ready_file)
         sys.exit(6)
 
+    # Reabre primeiro, limpeza depois
     if not relaunch_app(new_app_exe, app_dir, base_log):
+        remove_ready(ready_file)
         sys.exit(7)
+
+    remove_ready(ready_file)
 
     if backup_dir.exists():
         remove_dir_with_retry(backup_dir, base_log)
