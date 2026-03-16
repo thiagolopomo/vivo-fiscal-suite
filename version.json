@@ -1,7 +1,7 @@
 {
   "version": "2.1.3",
   "mandatory": false,
-  "notes": "teste update",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v4.0.8/package.zip",
-  "sha256": "ecadf4cb1d285f9e706322039e077fbc2ec8d8821d964db0b621f1a3aebd6fbf"
+  "notes": "Correções visuais e setup automatizado",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.3/package.zip",
+  "sha256": "2028f3a02a7d3a110a1afb99498a072ac066375920774c25021f69a26d286c6a"
 }
