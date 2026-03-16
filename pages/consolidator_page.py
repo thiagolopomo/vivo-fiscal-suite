@@ -4,7 +4,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QFrame, QFileDialog, QMessageBox, QTextEdit, QSizePolicy, QProgressBar,
@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from workers.consolidator_worker import ConsolidatorProcessWorker, ConsolidatorExportWorker
-from pages.p9_page import PathCard, MetricBox, HoverCard
+from pages.p9_page import PathCard, MetricBox, HoverCard, ResponsiveMetricGrid
 
 
 class ConsolidatorPage(QWidget):
@@ -23,6 +23,15 @@ class ConsolidatorPage(QWidget):
         self.export_worker = None
         self.parquet_cache_path = None
         self.tipo_movimento = None
+
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._apply_responsive_mode)
+
+        self._last_layout_mode = None
+        self._last_action_mode = None
+        self._last_metric_cols = None
+        self._last_paths_mode = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -117,8 +126,9 @@ class ConsolidatorPage(QWidget):
 
         self.exec_card = HoverCard()
         self.exec_card.setObjectName("PremiumExecCard")
-        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.exec_card.setMinimumHeight(132)
+        self.exec_card.setMaximumHeight(190)
 
         exec_layout = QVBoxLayout(self.exec_card)
         exec_layout.setContentsMargins(14, 12, 14, 12)
@@ -159,7 +169,7 @@ class ConsolidatorPage(QWidget):
         self.stream_card = HoverCard()
         self.stream_card.setObjectName("PremiumLogCard")
         self.stream_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.stream_card.setMinimumHeight(260)
+        self.stream_card.setMinimumHeight(180)
 
         stream_layout = QVBoxLayout(self.stream_card)
         stream_layout.setContentsMargins(14, 12, 14, 12)
@@ -177,7 +187,7 @@ class ConsolidatorPage(QWidget):
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
         self.saida.setPlaceholderText("Os logs do processamento e da exportação aparecerão aqui.")
-        self.saida.setMinimumHeight(170)
+        self.saida.setMinimumHeight(0)
         self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         stream_layout.addWidget(self.saida, 1)
 
@@ -202,19 +212,17 @@ class ConsolidatorPage(QWidget):
         sm1.setObjectName("SectionEyebrow")
         summary_layout.addWidget(sm1)
 
-        self.summary_grid = QGridLayout()
-        self.summary_grid.setHorizontalSpacing(8)
-        self.summary_grid.setVerticalSpacing(8)
+        self.metric_grid = ResponsiveMetricGrid(min_item_width=170)
 
         self.metric_tipo = MetricBox("Tipo detectado")
         self.metric_linhas = MetricBox("Linhas")
         self.metric_base = MetricBox("Base interna", "Nenhuma base processada")
 
-        self.summary_grid.addWidget(self.metric_tipo, 0, 0)
-        self.summary_grid.addWidget(self.metric_linhas, 1, 0)
-        self.summary_grid.addWidget(self.metric_base, 2, 0)
+        self.metric_grid.addMetric(self.metric_tipo)
+        self.metric_grid.addMetric(self.metric_linhas)
+        self.metric_grid.addMetric(self.metric_base)
 
-        summary_layout.addLayout(self.summary_grid)
+        summary_layout.addWidget(self.metric_grid)
         summary_layout.addStretch(1)
 
         left_wrap = QWidget()
@@ -230,52 +238,64 @@ class ConsolidatorPage(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._apply_responsive_mode()
-
-    def _clear_grid(self, grid):
-        while grid.count():
-            item = grid.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
+        self._resize_timer.start(30)
 
     def _apply_responsive_mode(self):
         w = self.width()
 
-        if w < 920:
-            self.paths_layout.setDirection(QBoxLayout.TopToBottom)
+        paths_vertical = w < 920
+        action_vertical = w < 980
+        bottom_vertical = w < 980
+
+        if w < 760:
+            metric_cols = 1
+        elif w < 1180:
+            metric_cols = 2 if bottom_vertical else 1
         else:
-            self.paths_layout.setDirection(QBoxLayout.LeftToRight)
+            metric_cols = 3 if bottom_vertical else 1
 
-        if w < 980:
-            self.action_row.setDirection(QBoxLayout.TopToBottom)
-            self.btn_processar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            self.btn_andersen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            self.btn_vivo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        else:
-            self.action_row.setDirection(QBoxLayout.LeftToRight)
-            self.btn_processar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.btn_andersen.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.btn_vivo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        if self._last_layout_mode != bottom_vertical:
+            self._last_layout_mode = bottom_vertical
 
-        self._clear_grid(self.summary_grid)
+            if bottom_vertical:
+                self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
+                self.bottom_layout.setSpacing(10)
+                self.summary.setMinimumWidth(0)
+                self.summary.setMaximumWidth(16777215)
+                self.exec_card.setMinimumHeight(140)
+                self.exec_card.setMaximumHeight(220)
+                self.stream_card.setMinimumHeight(180)
+            else:
+                self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
+                self.bottom_layout.setSpacing(12)
+                self.summary.setMinimumWidth(300)
+                self.summary.setMaximumWidth(360)
+                self.exec_card.setMinimumHeight(132)
+                self.exec_card.setMaximumHeight(190)
+                self.stream_card.setMinimumHeight(220)
 
-        if w < 980:
-            self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
-            self.summary.setMinimumWidth(0)
-            self.summary.setMaximumWidth(16777215)
+        if self._last_paths_mode != paths_vertical:
+            self._last_paths_mode = paths_vertical
+            self.paths_layout.setDirection(
+                QBoxLayout.TopToBottom if paths_vertical else QBoxLayout.LeftToRight
+            )
 
-            self.summary_grid.addWidget(self.metric_tipo, 0, 0)
-            self.summary_grid.addWidget(self.metric_linhas, 0, 1)
-            self.summary_grid.addWidget(self.metric_base, 0, 2)
-        else:
-            self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
-            self.summary.setMinimumWidth(300)
-            self.summary.setMaximumWidth(360)
+        if self._last_action_mode != action_vertical:
+            self._last_action_mode = action_vertical
+            if action_vertical:
+                self.action_row.setDirection(QBoxLayout.TopToBottom)
+                self.btn_processar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                self.btn_andersen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                self.btn_vivo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            else:
+                self.action_row.setDirection(QBoxLayout.LeftToRight)
+                self.btn_processar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                self.btn_andersen.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                self.btn_vivo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-            self.summary_grid.addWidget(self.metric_tipo, 0, 0)
-            self.summary_grid.addWidget(self.metric_linhas, 1, 0)
-            self.summary_grid.addWidget(self.metric_base, 2, 0)
+        if self._last_metric_cols != metric_cols:
+            self._last_metric_cols = metric_cols
+            self.metric_grid.setForcedColumns(metric_cols)
 
     def selecionar_base_dir(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta base com os TXT")

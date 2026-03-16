@@ -4,7 +4,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QEasingCurve, QPropertyAnimation, QPointF
+from PySide6.QtCore import Qt, QEasingCurve, QPropertyAnimation, QPointF, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFrame,
@@ -73,6 +73,65 @@ class HoverCard(QFrame):
 
         super().leaveEvent(event)
 
+
+class ResponsiveMetricGrid(QWidget):
+    def __init__(self, min_item_width=170, parent=None):
+        super().__init__(parent)
+        self.min_item_width = min_item_width
+        self.items = []
+        self.forced_cols = None
+        self._current_cols = None
+
+        self._layout = QGridLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setHorizontalSpacing(8)
+        self._layout.setVerticalSpacing(8)
+
+    def addMetric(self, widget):
+        self.items.append(widget)
+        self._rebuild(force=True)
+
+    def setForcedColumns(self, cols=None):
+        if self.forced_cols == cols:
+            return
+        self.forced_cols = cols
+        self._rebuild(force=True)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._rebuild()
+
+    def _compute_cols(self):
+        if not self.items:
+            return 1
+
+        if self.forced_cols is not None:
+            return max(1, min(self.forced_cols, len(self.items)))
+
+        width = max(1, self.width())
+        cols = max(1, width // self.min_item_width)
+        return min(cols, len(self.items))
+
+    def _rebuild(self, force=False):
+        if not self.items:
+            return
+
+        cols = self._compute_cols()
+
+        if not force and cols == self._current_cols:
+            return
+
+        self._current_cols = cols
+
+        while self._layout.count():
+            self._layout.takeAt(0)
+
+        for i, w in enumerate(self.items):
+            row = i // cols
+            col = i % cols
+            self._layout.addWidget(w, row, col)
+
+        self.updateGeometry()
 
 class PathCard(HoverCard):
     def __init__(self, eyebrow, titulo, subtitulo, texto_botao, on_click):
@@ -171,6 +230,14 @@ class P9Page(QWidget):
         super().__init__()
         self.worker = None
 
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._apply_responsive_mode)
+
+        self._last_layout_mode = None
+        self._last_action_mode = None
+        self._last_metric_cols = None
+
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
@@ -246,8 +313,9 @@ class P9Page(QWidget):
 
         self.exec_card = HoverCard()
         self.exec_card.setObjectName("PremiumExecCard")
-        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.exec_card.setMinimumHeight(132)
+        self.exec_card.setMaximumHeight(190)
 
         exec_layout = QVBoxLayout(self.exec_card)
         exec_layout.setContentsMargins(14, 12, 14, 12)
@@ -288,7 +356,7 @@ class P9Page(QWidget):
         self.log_card = HoverCard()
         self.log_card.setObjectName("PremiumLogCard")
         self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.log_card.setMinimumHeight(260)
+        self.log_card.setMinimumHeight(180)
 
         log_layout = QVBoxLayout(self.log_card)
         log_layout.setContentsMargins(14, 12, 14, 12)
@@ -306,7 +374,7 @@ class P9Page(QWidget):
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
         self.saida.setPlaceholderText("A saída do processamento aparecerá aqui.")
-        self.saida.setMinimumHeight(170)
+        self.saida.setMinimumHeight(0)
         self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout.addWidget(self.saida, 1)
 
@@ -331,19 +399,17 @@ class P9Page(QWidget):
         sm1.setObjectName("SectionEyebrow")
         summary_layout.addWidget(sm1)
 
-        self.summary_grid = QGridLayout()
-        self.summary_grid.setHorizontalSpacing(8)
-        self.summary_grid.setVerticalSpacing(8)
+        self.metric_grid = ResponsiveMetricGrid(min_item_width=170)
 
         self.metric_pdfs = MetricBox("PDFs processados")
         self.metric_cfop = MetricBox("Linhas CFOP")
         self.metric_resumo = MetricBox("Linhas resumo")
 
-        self.summary_grid.addWidget(self.metric_pdfs, 0, 0)
-        self.summary_grid.addWidget(self.metric_cfop, 1, 0)
-        self.summary_grid.addWidget(self.metric_resumo, 2, 0)
+        self.metric_grid.addMetric(self.metric_pdfs)
+        self.metric_grid.addMetric(self.metric_cfop)
+        self.metric_grid.addMetric(self.metric_resumo)
 
-        summary_layout.addLayout(self.summary_grid)
+        summary_layout.addWidget(self.metric_grid)
         summary_layout.addStretch(1)
 
         left_wrap = QWidget()
@@ -359,48 +425,60 @@ class P9Page(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._apply_responsive_mode()
-
-    def _clear_grid(self, grid):
-        while grid.count():
-            item = grid.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.setParent(None)
+        self._resize_timer.start(30)
 
     def _apply_responsive_mode(self):
         w = self.width()
 
-        if w < 920:
-            self.paths_layout.setDirection(QBoxLayout.TopToBottom)
+        paths_vertical = w < 920
+        action_vertical = w < 700
+        bottom_vertical = w < 980
+
+        if w < 760:
+            metric_cols = 1
+        elif w < 1180:
+            metric_cols = 2 if bottom_vertical else 1
         else:
-            self.paths_layout.setDirection(QBoxLayout.LeftToRight)
+            metric_cols = 3 if bottom_vertical else 1
 
-        if w < 700:
-            self.action_row.setDirection(QBoxLayout.TopToBottom)
-            self.run_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        else:
-            self.action_row.setDirection(QBoxLayout.LeftToRight)
-            self.run_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        if self._last_layout_mode != bottom_vertical:
+            self._last_layout_mode = bottom_vertical
 
-        self._clear_grid(self.summary_grid)
+            if bottom_vertical:
+                self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
+                self.bottom_layout.setSpacing(10)
+                self.summary.setMinimumWidth(0)
+                self.summary.setMaximumWidth(16777215)
+                self.exec_card.setMinimumHeight(140)
+                self.exec_card.setMaximumHeight(220)
+                self.log_card.setMinimumHeight(180)
+            else:
+                self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
+                self.bottom_layout.setSpacing(12)
+                self.summary.setMinimumWidth(300)
+                self.summary.setMaximumWidth(360)
+                self.exec_card.setMinimumHeight(132)
+                self.exec_card.setMaximumHeight(190)
+                self.log_card.setMinimumHeight(220)
 
-        if w < 980:
-            self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
-            self.summary.setMinimumWidth(0)
-            self.summary.setMaximumWidth(16777215)
+        if getattr(self, "_last_paths_mode", None) != paths_vertical:
+            self._last_paths_mode = paths_vertical
+            self.paths_layout.setDirection(
+                QBoxLayout.TopToBottom if paths_vertical else QBoxLayout.LeftToRight
+            )
 
-            self.summary_grid.addWidget(self.metric_pdfs, 0, 0)
-            self.summary_grid.addWidget(self.metric_cfop, 0, 1)
-            self.summary_grid.addWidget(self.metric_resumo, 0, 2)
-        else:
-            self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
-            self.summary.setMinimumWidth(300)
-            self.summary.setMaximumWidth(360)
+        if self._last_action_mode != action_vertical:
+            self._last_action_mode = action_vertical
+            if action_vertical:
+                self.action_row.setDirection(QBoxLayout.TopToBottom)
+                self.run_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            else:
+                self.action_row.setDirection(QBoxLayout.LeftToRight)
+                self.run_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-            self.summary_grid.addWidget(self.metric_pdfs, 0, 0)
-            self.summary_grid.addWidget(self.metric_cfop, 1, 0)
-            self.summary_grid.addWidget(self.metric_resumo, 2, 0)
+        if self._last_metric_cols != metric_cols:
+            self._last_metric_cols = metric_cols
+            self.metric_grid.setForcedColumns(metric_cols)
 
     def selecionar_pasta_pdfs(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta com os PDFs")
