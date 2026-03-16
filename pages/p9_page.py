@@ -141,8 +141,8 @@ class MetricBox(QFrame):
 
         self.setObjectName("PremiumMetricBox")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setMinimumHeight(68)
-        self.setMaximumHeight(68)
+        self.setMinimumHeight(74)
+        self.setMaximumHeight(74)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -246,6 +246,9 @@ class P9Page(QWidget):
 
         self.exec_card = HoverCard()
         self.exec_card.setObjectName("PremiumExecCard")
+        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.exec_card.setMinimumHeight(132)
+
         exec_layout = QVBoxLayout(self.exec_card)
         exec_layout.setContentsMargins(14, 12, 14, 12)
         exec_layout.setSpacing(8)
@@ -280,11 +283,12 @@ class P9Page(QWidget):
         self.left_col = QVBoxLayout()
         self.left_col.setSpacing(12)
 
-        self.left_col.addWidget(self.exec_card)
+        self.left_col.addWidget(self.exec_card, 0)
 
         self.log_card = HoverCard()
         self.log_card.setObjectName("PremiumLogCard")
         self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.log_card.setMinimumHeight(260)
 
         log_layout = QVBoxLayout(self.log_card)
         log_layout.setContentsMargins(14, 12, 14, 12)
@@ -302,7 +306,7 @@ class P9Page(QWidget):
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
         self.saida.setPlaceholderText("A saída do processamento aparecerá aqui.")
-        self.saida.setMinimumHeight(130)
+        self.saida.setMinimumHeight(170)
         self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout.addWidget(self.saida, 1)
 
@@ -310,12 +314,13 @@ class P9Page(QWidget):
 
         self.summary = HoverCard()
         self.summary.setObjectName("PremiumSummaryCard")
-        self.summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.summary.setMinimumWidth(250)
+        self.summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.summary.setMinimumWidth(300)
+        self.summary.setMaximumWidth(360)
 
         summary_layout = QVBoxLayout(self.summary)
         summary_layout.setContentsMargins(12, 10, 12, 10)
-        summary_layout.setSpacing(6)
+        summary_layout.setSpacing(8)
 
         sm_acc = QFrame()
         sm_acc.setObjectName("CardAccentLine")
@@ -326,27 +331,27 @@ class P9Page(QWidget):
         sm1.setObjectName("SectionEyebrow")
         summary_layout.addWidget(sm1)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(8)
-        grid.setVerticalSpacing(8)
+        self.summary_grid = QGridLayout()
+        self.summary_grid.setHorizontalSpacing(8)
+        self.summary_grid.setVerticalSpacing(8)
 
         self.metric_pdfs = MetricBox("PDFs processados")
         self.metric_cfop = MetricBox("Linhas CFOP")
         self.metric_resumo = MetricBox("Linhas resumo")
 
-        grid.addWidget(self.metric_pdfs, 0, 0)
-        grid.addWidget(self.metric_cfop, 1, 0)
-        grid.addWidget(self.metric_resumo, 2, 0)
+        self.summary_grid.addWidget(self.metric_pdfs, 0, 0)
+        self.summary_grid.addWidget(self.metric_cfop, 1, 0)
+        self.summary_grid.addWidget(self.metric_resumo, 2, 0)
 
-        summary_layout.addLayout(grid)
+        summary_layout.addLayout(self.summary_grid)
         summary_layout.addStretch(1)
 
         left_wrap = QWidget()
         left_wrap.setLayout(self.left_col)
         left_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self.bottom_layout.addWidget(left_wrap, 7)
-        self.bottom_layout.addWidget(self.summary, 3)
+        self.bottom_layout.addWidget(left_wrap, 1)
+        self.bottom_layout.addWidget(self.summary, 0)
 
         outer.addLayout(self.bottom_layout, 1)
 
@@ -356,27 +361,46 @@ class P9Page(QWidget):
         super().resizeEvent(event)
         self._apply_responsive_mode()
 
+    def _clear_grid(self, grid):
+        while grid.count():
+            item = grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+
     def _apply_responsive_mode(self):
         w = self.width()
 
-        if w < 980:
+        if w < 920:
             self.paths_layout.setDirection(QBoxLayout.TopToBottom)
         else:
             self.paths_layout.setDirection(QBoxLayout.LeftToRight)
 
-        if w < 760:
+        if w < 700:
             self.action_row.setDirection(QBoxLayout.TopToBottom)
             self.run_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         else:
             self.action_row.setDirection(QBoxLayout.LeftToRight)
             self.run_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-        if w < 1180:
+        self._clear_grid(self.summary_grid)
+
+        if w < 980:
             self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
             self.summary.setMinimumWidth(0)
+            self.summary.setMaximumWidth(16777215)
+
+            self.summary_grid.addWidget(self.metric_pdfs, 0, 0)
+            self.summary_grid.addWidget(self.metric_cfop, 0, 1)
+            self.summary_grid.addWidget(self.metric_resumo, 0, 2)
         else:
             self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
-            self.summary.setMinimumWidth(250)
+            self.summary.setMinimumWidth(300)
+            self.summary.setMaximumWidth(360)
+
+            self.summary_grid.addWidget(self.metric_pdfs, 0, 0)
+            self.summary_grid.addWidget(self.metric_cfop, 1, 0)
+            self.summary_grid.addWidget(self.metric_resumo, 2, 0)
 
     def selecionar_pasta_pdfs(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta com os PDFs")

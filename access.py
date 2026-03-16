@@ -50,6 +50,21 @@ def consultar_status_acesso(session_id, machine_id):
     dados = resp.json()
     return dados[0] if dados else None
 
+def consultar_aprovacao_existente(machine_id):
+    url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
+    params = {
+        "select": "id,status,session_id,machine_id,usuario_windows,maquina,created_at",
+        "machine_id": f"eq.{machine_id}",
+        "status": "eq.aprovado",
+        "order": "created_at.desc",
+        "limit": "1",
+    }
+
+    resp = requests.get(url, headers=_supabase_headers(), params=params, timeout=20)
+    resp.raise_for_status()
+    dados = resp.json()
+    return dados[0] if dados else None
+
 
 def solicitar_acesso_remoto(machine_id, session_id):
     url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}"
@@ -267,6 +282,16 @@ class TelaAcesso(QDialog):
 
     def verificar_status_inicial(self):
         try:
+            # 1) primeiro vê se essa máquina já foi aprovada antes
+            aprovacao_existente = consultar_aprovacao_existente(self.machine_id)
+            if aprovacao_existente:
+                self.acesso_liberado = True
+                self.btn_solicitar.setEnabled(False)
+                self._set_status("Esta estação já foi validada anteriormente. Abrindo suíte...")
+                QTimer.singleShot(500, self.accept)
+                return
+
+            # 2) se não houver aprovação antiga, segue a lógica normal da sessão atual
             registro = consultar_status_acesso(self.session_id, self.machine_id)
             if not registro:
                 self._set_status("Nenhuma solicitação enviada ainda.")
@@ -276,6 +301,7 @@ class TelaAcesso(QDialog):
 
             if status == "aprovado":
                 self.acesso_liberado = True
+                self.btn_solicitar.setEnabled(False)
                 self._set_status("Acesso aprovado. Abrindo suíte...")
                 QTimer.singleShot(500, self.accept)
                 return
@@ -317,6 +343,16 @@ class TelaAcesso(QDialog):
 
     def _poll_status(self):
         try:
+            aprovacao_existente = consultar_aprovacao_existente(self.machine_id)
+            if aprovacao_existente:
+                self.timer.stop()
+                self._polling = False
+                self.acesso_liberado = True
+                self.btn_solicitar.setEnabled(False)
+                self._set_status("Esta estação já foi validada anteriormente. Abrindo suíte...")
+                QTimer.singleShot(500, self.accept)
+                return
+
             registro = consultar_status_acesso(self.session_id, self.machine_id)
             status = (registro or {}).get("status", "").lower()
 
@@ -324,6 +360,7 @@ class TelaAcesso(QDialog):
                 self.timer.stop()
                 self._polling = False
                 self.acesso_liberado = True
+                self.btn_solicitar.setEnabled(False)
                 self._set_status("Acesso aprovado. Abrindo suíte...")
                 QTimer.singleShot(500, self.accept)
                 return
