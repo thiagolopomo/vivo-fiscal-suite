@@ -8,7 +8,6 @@ import time
 import json
 
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import pyarrow.parquet as pq
 import pythoncom
@@ -29,7 +28,6 @@ LOGO_VIVO_ARQ = "logo_vivo.png"
 
 COMPRESSION = "zstd"
 ROW_GROUP = 100_000
-MAX_WORKERS = max(1, min(8, (os.cpu_count() or 4) - 1))
 PIPE_PLACEHOLDER = "<<<PIPE_DESC>>>"
 
 ARQ_TABELA_DIV = "Tabela_Divisao.csv"
@@ -1200,27 +1198,22 @@ def consolidar_final(base_dir_str, progress_callback=None):
 
     args = [(str(a), str(tmp_dir)) for a in arquivos]
 
-    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        futures = {ex.submit(processar_arquivo, arg): arg[0] for arg in args}
+    for i, arg in enumerate(args, start=1):
+        res = processar_arquivo(arg)
 
-        concluidos = 0
-        for fut in as_completed(futures):
-            res = fut.result()
-            concluidos += 1
+        if progress_callback:
+            progress_callback(
+                "processando_txt",
+                i,
+                total_arquivos,
+                res.get("arquivo", "")
+            )
 
-            if progress_callback:
-                progress_callback(
-                    "processando_txt",
-                    concluidos,
-                    total_arquivos,
-                    res.get("arquivo", "")
-                )
+        if not res["ok"]:
+            continue
 
-            if not res["ok"]:
-                continue
-
-            shard_paths.append(res["shard"])
-            total_linhas += res["linhas"]
+        shard_paths.append(res["shard"])
+        total_linhas += res["linhas"]
 
     if not shard_paths:
         raise ValueError("Nenhum shard gerado.")

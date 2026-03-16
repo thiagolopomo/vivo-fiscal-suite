@@ -3,6 +3,7 @@
 
 import sys
 import time
+import multiprocessing
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QTimer
@@ -189,4 +190,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()
