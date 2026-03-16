@@ -4,31 +4,101 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEasingCurve, QPropertyAnimation, QPointF
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QFileDialog, QMessageBox, QTextEdit, QLineEdit, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFrame,
+    QFileDialog, QMessageBox, QTextEdit, QLineEdit, QSizePolicy, QProgressBar,
+    QGraphicsDropShadowEffect, QBoxLayout
 )
 
 from workers.p9_worker import P9Worker
 
 
-class PathCard(QFrame):
+class HoverCard(QFrame):
+    def __init__(self):
+        super().__init__()
+
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setBlurRadius(18)
+        self._shadow.setOffset(0, 3)
+        self._shadow.setColor(QColor(112, 55, 190, 24))
+        self.setGraphicsEffect(self._shadow)
+
+        self._anim_blur = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        self._anim_blur.setDuration(170)
+        self._anim_blur.setEasingCurve(QEasingCurve.OutCubic)
+
+        self._anim_offset = QPropertyAnimation(self._shadow, b"offset", self)
+        self._anim_offset.setDuration(170)
+        self._anim_offset.setEasingCurve(QEasingCurve.OutCubic)
+
+        self.setMouseTracking(True)
+
+    def enterEvent(self, event):
+        self._anim_blur.stop()
+        self._anim_blur.setStartValue(self._shadow.blurRadius())
+        self._anim_blur.setEndValue(28)
+        self._anim_blur.start()
+
+        self._anim_offset.stop()
+        self._anim_offset.setStartValue(self._shadow.offset())
+        self._anim_offset.setEndValue(QPointF(0, 5))
+        self._anim_offset.start()
+
+        self._shadow.setColor(QColor(140, 70, 230, 72))
+
+        self.setProperty("hover", True)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._anim_blur.stop()
+        self._anim_blur.setStartValue(self._shadow.blurRadius())
+        self._anim_blur.setEndValue(18)
+        self._anim_blur.start()
+
+        self._anim_offset.stop()
+        self._anim_offset.setStartValue(self._shadow.offset())
+        self._anim_offset.setEndValue(QPointF(0, 3))
+        self._anim_offset.start()
+
+        self._shadow.setColor(QColor(112, 55, 190, 24))
+
+        self.setProperty("hover", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+        super().leaveEvent(event)
+
+
+class PathCard(HoverCard):
     def __init__(self, eyebrow, titulo, subtitulo, texto_botao, on_click):
         super().__init__()
-        self.setObjectName("SoftCard")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self.setObjectName("PremiumPathCard")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.setMinimumHeight(220)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(10)
+
+        accent = QFrame()
+        accent.setObjectName("CardAccentLine")
+        accent.setFixedHeight(2)
+        layout.addWidget(accent)
 
         lb_eyebrow = QLabel(eyebrow)
         lb_eyebrow.setObjectName("SectionEyebrow")
+        lb_eyebrow.setWordWrap(True)
         layout.addWidget(lb_eyebrow)
 
         lb_title = QLabel(titulo)
         lb_title.setObjectName("FieldTitle")
+        lb_title.setWordWrap(True)
         layout.addWidget(lb_title)
 
         lb_sub = QLabel(subtitulo)
@@ -39,33 +109,61 @@ class PathCard(QFrame):
         self.input = QLineEdit()
         self.input.setReadOnly(True)
         self.input.setPlaceholderText("Nenhuma pasta selecionada")
-        self.input.setMinimumHeight(44)
+        self.input.setMinimumHeight(42)
+        self.input.setMaximumHeight(42)
+        self.input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.input.setObjectName("PathInput")
         layout.addWidget(self.input)
+
+        layout.addSpacing(4)
 
         self.btn = QPushButton(texto_botao)
         self.btn.setObjectName("SecondaryButton")
-        self.btn.setMinimumHeight(40)
+        self.btn.setMinimumHeight(42)
+        self.btn.setMaximumHeight(42)
+        self.btn.setMinimumWidth(175)
+        self.btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.btn.clicked.connect(on_click)
-        layout.addWidget(self.btn, 0, Qt.AlignLeft)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(0)
+        btn_row.addWidget(self.btn, 0, Qt.AlignLeft | Qt.AlignTop)
+        btn_row.addStretch(1)
+
+        layout.addLayout(btn_row)
+        layout.addStretch(1)
 
 
 class MetricBox(QFrame):
     def __init__(self, titulo, valor="—"):
         super().__init__()
-        self.setObjectName("AccentPanel")
+
+        self.setObjectName("PremiumMetricBox")
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(68)
+        self.setMaximumHeight(68)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(3)
+
+        accent = QFrame()
+        accent.setObjectName("MetricAccentLine")
+        accent.setFixedHeight(1)
+        layout.addWidget(accent)
 
         lb_t = QLabel(titulo)
         lb_t.setObjectName("MetricTitle")
+        lb_t.setWordWrap(True)
         layout.addWidget(lb_t)
 
         self.lb_v = QLabel(valor)
         self.lb_v.setObjectName("MetricValue")
         self.lb_v.setWordWrap(True)
         layout.addWidget(self.lb_v)
+
+        layout.addStretch(1)
 
 
 class P9Page(QWidget):
@@ -75,160 +173,210 @@ class P9Page(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(16)
+        root.setSpacing(10)
 
         card = QFrame()
         card.setObjectName("PageCard")
         root.addWidget(card)
 
         outer = QVBoxLayout(card)
-        outer.setContentsMargins(22, 22, 22, 22)
-        outer.setSpacing(18)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(12)
 
-        header = QHBoxLayout()
-        header.setSpacing(16)
+        header = QVBoxLayout()
+        header.setSpacing(4)
 
-        left_header = QVBoxLayout()
-        left_header.setSpacing(5)
+        lb1 = QLabel("PDF VALIDATION")
+        lb1.setObjectName("SectionEyebrow")
+        header.addWidget(lb1)
 
-        eyebrow = QLabel("PDF VALIDATION")
-        eyebrow.setObjectName("SectionEyebrow")
-        left_header.addWidget(eyebrow)
+        lb2 = QLabel("Validação P9")
+        lb2.setObjectName("SectionTitle")
+        lb2.setWordWrap(True)
+        header.addWidget(lb2)
 
-        title = QLabel("Validação P9")
-        title.setObjectName("SectionTitle")
-        left_header.addWidget(title)
-
-        subtitle = QLabel(
-            "Leitura de RAICMS em PDF com geração de Excel, resumo executivo e acompanhamento do processamento em tempo real."
-        )
-        subtitle.setObjectName("SectionText")
-        subtitle.setWordWrap(True)
-        left_header.addWidget(subtitle)
-
-        header.addLayout(left_header, 1)
-
-        self.run_btn = QPushButton("Executar validação")
-        self.run_btn.setObjectName("PrimaryButton")
-        self.run_btn.setMinimumHeight(46)
-        self.run_btn.setMinimumWidth(180)
-        self.run_btn.clicked.connect(self.executar)
-        header.addWidget(self.run_btn, 0, Qt.AlignRight | Qt.AlignTop)
+        lb3 = QLabel("Leitura de PDFs com geração de consolidado em Excel.")
+        lb3.setObjectName("SectionText")
+        lb3.setWordWrap(True)
+        header.addWidget(lb3)
 
         outer.addLayout(header)
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(16)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setObjectName("SectionDivider")
+        outer.addWidget(divider)
+
+        self.paths_layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.paths_layout.setSpacing(12)
 
         self.card_pdfs = PathCard(
             "ORIGEM",
             "Biblioteca de PDFs",
-            "Escolha a pasta onde estão os arquivos que serão lidos pelo motor de validação.",
+            "Selecione a pasta com os PDFs fiscais de entrada.",
             "Selecionar PDFs",
             self.selecionar_pasta_pdfs,
         )
-        top_row.addWidget(self.card_pdfs, 1)
 
         self.card_destino = PathCard(
             "DESTINO",
-            "Saída dos arquivos",
-            "Defina a pasta onde serão gravados o consolidado geral e os arquivos por período.",
+            "Pasta de saída",
+            "Defina onde serão gravados o consolidado e os auxiliares.",
             "Selecionar destino",
             self.selecionar_pasta_destino,
         )
-        top_row.addWidget(self.card_destino, 1)
 
-        outer.addLayout(top_row)
+        self.paths_layout.addWidget(self.card_pdfs, 1)
+        self.paths_layout.addWidget(self.card_destino, 1)
+        outer.addLayout(self.paths_layout)
 
-        body = QHBoxLayout()
-        body.setSpacing(16)
-        outer.addLayout(body, 1)
+        self.action_row = QBoxLayout(QBoxLayout.LeftToRight)
+        self.action_row.setSpacing(10)
 
-        left = QVBoxLayout()
-        left.setSpacing(14)
-        body.addLayout(left, 7)
+        self.run_btn = QPushButton("Executar validação")
+        self.run_btn.setObjectName("PrimaryButton")
+        self.run_btn.setMinimumHeight(40)
+        self.run_btn.setMinimumWidth(185)
+        self.run_btn.clicked.connect(self.executar)
 
-        right = QVBoxLayout()
-        right.setSpacing(14)
-        body.addLayout(right, 4)
+        self.action_row.addWidget(self.run_btn, 0)
+        self.action_row.addStretch(1)
 
-        flow_card = QFrame()
-        flow_card.setObjectName("GlassCard")
-        flow_layout = QVBoxLayout(flow_card)
-        flow_layout.setContentsMargins(18, 16, 18, 16)
-        flow_layout.setSpacing(10)
+        outer.addLayout(self.action_row)
 
-        l1 = QLabel("PROCESS FLOW")
-        l1.setObjectName("SectionEyebrow")
-        flow_layout.addWidget(l1)
+        self.exec_card = HoverCard()
+        self.exec_card.setObjectName("PremiumExecCard")
+        exec_layout = QVBoxLayout(self.exec_card)
+        exec_layout.setContentsMargins(14, 12, 14, 12)
+        exec_layout.setSpacing(8)
+
+        e_acc = QFrame()
+        e_acc.setObjectName("CardAccentLine")
+        e_acc.setFixedHeight(2)
+        exec_layout.addWidget(e_acc)
+
+        e1 = QLabel("ANDAMENTO")
+        e1.setObjectName("SectionEyebrow")
+        exec_layout.addWidget(e1)
 
         self.status_texto = QLabel("Pronto para iniciar.")
         self.status_texto.setObjectName("InfoValue")
         self.status_texto.setWordWrap(True)
-        flow_layout.addWidget(self.status_texto)
+        exec_layout.addWidget(self.status_texto)
 
-        from PySide6.QtWidgets import QProgressBar
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        flow_layout.addWidget(self.progress)
+        self.progress.setFixedHeight(16)
+        exec_layout.addWidget(self.progress)
 
         self.progresso_texto = QLabel("0 / 0")
         self.progresso_texto.setObjectName("FieldText")
-        flow_layout.addWidget(self.progresso_texto)
+        exec_layout.addWidget(self.progresso_texto)
 
-        left.addWidget(flow_card)
+        self.bottom_layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.bottom_layout.setSpacing(12)
 
-        log_card = QFrame()
-        log_card.setObjectName("SoftCard")
-        log_layout = QVBoxLayout(log_card)
-        log_layout.setContentsMargins(18, 16, 18, 16)
-        log_layout.setSpacing(10)
+        self.left_col = QVBoxLayout()
+        self.left_col.setSpacing(12)
 
-        tx1 = QLabel("OUTPUT STREAM")
+        self.left_col.addWidget(self.exec_card)
+
+        self.log_card = HoverCard()
+        self.log_card.setObjectName("PremiumLogCard")
+        self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        log_layout = QVBoxLayout(self.log_card)
+        log_layout.setContentsMargins(14, 12, 14, 12)
+        log_layout.setSpacing(8)
+
+        lg_acc = QFrame()
+        lg_acc.setObjectName("CardAccentLine")
+        lg_acc.setFixedHeight(2)
+        log_layout.addWidget(lg_acc)
+
+        tx1 = QLabel("SAÍDA DO PROCESSO")
         tx1.setObjectName("SectionEyebrow")
         log_layout.addWidget(tx1)
 
-        tx2 = QLabel("Acompanhe o arquivo atual, mensagens do processo e caminho final gerado.")
-        tx2.setObjectName("FieldText")
-        tx2.setWordWrap(True)
-        log_layout.addWidget(tx2)
-
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
-        self.saida.setPlaceholderText("A saída do processamento aparecerá aqui sem cortes.")
-        self.saida.setMinimumHeight(300)
+        self.saida.setPlaceholderText("A saída do processamento aparecerá aqui.")
+        self.saida.setMinimumHeight(130)
+        self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout.addWidget(self.saida, 1)
 
-        left.addWidget(log_card, 1)
+        self.left_col.addWidget(self.log_card, 1)
 
-        summary_card = QFrame()
-        summary_card.setObjectName("SoftCard")
-        summary_layout = QVBoxLayout(summary_card)
-        summary_layout.setContentsMargins(18, 16, 18, 16)
-        summary_layout.setSpacing(12)
+        self.summary = HoverCard()
+        self.summary.setObjectName("PremiumSummaryCard")
+        self.summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.summary.setMinimumWidth(250)
 
-        s1 = QLabel("EXECUTIVE SUMMARY")
-        s1.setObjectName("SectionEyebrow")
-        summary_layout.addWidget(s1)
+        summary_layout = QVBoxLayout(self.summary)
+        summary_layout.setContentsMargins(12, 10, 12, 10)
+        summary_layout.setSpacing(6)
 
-        s2 = QLabel("Indicadores finais do processamento.")
-        s2.setObjectName("FieldText")
-        s2.setWordWrap(True)
-        summary_layout.addWidget(s2)
+        sm_acc = QFrame()
+        sm_acc.setObjectName("CardAccentLine")
+        sm_acc.setFixedHeight(2)
+        summary_layout.addWidget(sm_acc)
 
-        self.stat_pdfs = MetricBox("PDFs processados")
-        self.stat_cfop = MetricBox("Linhas CFOP")
-        self.stat_resumo = MetricBox("Linhas Resumo")
-        self.stat_final = MetricBox("Arquivo final", "Nenhum arquivo gerado")
+        sm1 = QLabel("RESUMO")
+        sm1.setObjectName("SectionEyebrow")
+        summary_layout.addWidget(sm1)
 
-        summary_layout.addWidget(self.stat_pdfs)
-        summary_layout.addWidget(self.stat_cfop)
-        summary_layout.addWidget(self.stat_resumo)
-        summary_layout.addWidget(self.stat_final)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+
+        self.metric_pdfs = MetricBox("PDFs processados")
+        self.metric_cfop = MetricBox("Linhas CFOP")
+        self.metric_resumo = MetricBox("Linhas resumo")
+
+        grid.addWidget(self.metric_pdfs, 0, 0)
+        grid.addWidget(self.metric_cfop, 1, 0)
+        grid.addWidget(self.metric_resumo, 2, 0)
+
+        summary_layout.addLayout(grid)
         summary_layout.addStretch(1)
 
-        right.addWidget(summary_card)
+        left_wrap = QWidget()
+        left_wrap.setLayout(self.left_col)
+        left_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.bottom_layout.addWidget(left_wrap, 7)
+        self.bottom_layout.addWidget(self.summary, 3)
+
+        outer.addLayout(self.bottom_layout, 1)
+
+        self._apply_responsive_mode()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_mode()
+
+    def _apply_responsive_mode(self):
+        w = self.width()
+
+        if w < 980:
+            self.paths_layout.setDirection(QBoxLayout.TopToBottom)
+        else:
+            self.paths_layout.setDirection(QBoxLayout.LeftToRight)
+
+        if w < 760:
+            self.action_row.setDirection(QBoxLayout.TopToBottom)
+            self.run_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        else:
+            self.action_row.setDirection(QBoxLayout.LeftToRight)
+            self.run_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        if w < 1180:
+            self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
+            self.summary.setMinimumWidth(0)
+        else:
+            self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
+            self.summary.setMinimumWidth(250)
 
     def selecionar_pasta_pdfs(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta com os PDFs")
@@ -250,7 +398,7 @@ class P9Page(QWidget):
             self.status_texto.setText("Lendo PDFs...")
             self.saida.setPlainText(f"Arquivo atual: {detalhe}")
         elif etapa == "gerando_excel":
-            self.status_texto.setText("Gerando arquivos Excel...")
+            self.status_texto.setText("Gerando Excel...")
             self.saida.setPlainText(detalhe)
         elif etapa == "finalizado":
             self.status_texto.setText("Processamento concluído.")
@@ -288,10 +436,9 @@ class P9Page(QWidget):
     def finalizar_sucesso(self, resultado):
         self.run_btn.setEnabled(True)
 
-        self.stat_pdfs.lb_v.setText(str(resultado["arquivos_pdf"]))
-        self.stat_cfop.lb_v.setText(f'{resultado["linhas_cfop"]:,}'.replace(",", "."))
-        self.stat_resumo.lb_v.setText(f'{resultado["linhas_resumo"]:,}'.replace(",", "."))
-        self.stat_final.lb_v.setText(Path(resultado["arquivo_final"]).name)
+        self.metric_pdfs.lb_v.setText(str(resultado["arquivos_pdf"]))
+        self.metric_cfop.lb_v.setText(f'{resultado["linhas_cfop"]:,}'.replace(",", "."))
+        self.metric_resumo.lb_v.setText(f'{resultado["linhas_resumo"]:,}'.replace(",", "."))
 
         self.atualizar("finalizado", 1, 1, f"Arquivo final: {resultado['arquivo_final']}")
 

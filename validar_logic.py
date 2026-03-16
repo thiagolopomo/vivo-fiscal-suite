@@ -891,6 +891,9 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
         ])
 
         mapa_saida = {
+            "Índice": "Índice",
+            "Fonte": "Fonte",
+            "Período": "Período",
             "ID_ORIGEM": "ID Origem",
             "EMPRESA": "Empresa",
             "FILIAL": "Filial",
@@ -1123,13 +1126,18 @@ def processar_arquivo(args):
     )
 
     df = df.with_columns([
-        pl.when(pl.col("DivArquivo") == "")
-          .then(pl.col("Divisão_DePara").fill_null(""))
-          .when(pl.col("Divisão_DePara").fill_null("").str.to_uppercase() == pl.col("DivArquivo").str.to_uppercase())
-          .then(pl.col("DivArquivo"))
-          .otherwise(pl.col("DivArquivo"))
-          .alias("Divisão")
+        pl.when(pl.col("FILIAL").cast(pl.Utf8).str.strip_chars() == "3007")
+        .then(pl.lit("31SC"))
+        .when(pl.col("DivArquivo").str.to_uppercase() == "85MN")
+        .then(pl.lit("85MG"))
+        .when(pl.col("DivArquivo") == "")
+        .then(pl.col("Divisão_DePara").fill_null(""))
+        .when(pl.col("Divisão_DePara").fill_null("").str.to_uppercase() == pl.col("DivArquivo").str.to_uppercase())
+        .then(pl.col("DivArquivo"))
+        .otherwise(pl.col("DivArquivo"))
+        .alias("Divisão")
     ])
+
 
     df = df.with_columns(
         pl.col("CFOP_COD").cast(pl.Utf8).str.strip_chars().alias("CFOP_COD")

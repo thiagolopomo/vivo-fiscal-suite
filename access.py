@@ -75,8 +75,8 @@ class TelaAcesso(QDialog):
 
         self.setWindowTitle("Acesso seguro")
         self.setModal(True)
-        self.resize(860, 540)
-        self.setMinimumSize(760, 500)
+        self.resize(760, 460)
+        self.setMinimumSize(640, 420)
 
         self.session_id = str(uuid.uuid4())
         self.machine_id = gerar_machine_id()
@@ -95,27 +95,27 @@ class TelaAcesso(QDialog):
 
     def _montar_tela(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(26, 26, 26, 26)
+        root.setContentsMargins(18, 18, 18, 18)
 
         card = QFrame()
         card.setObjectName("PageCard")
         root.addWidget(card)
 
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(34)
-        shadow.setOffset(0, 12)
-        shadow.setColor(QColor(89, 48, 146, 28))
+        shadow.setBlurRadius(28)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(89, 48, 146, 20))
         card.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(28, 28, 28, 28)
-        layout.setSpacing(18)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
 
         header = QHBoxLayout()
-        header.setSpacing(18)
+        header.setSpacing(14)
 
         left = QVBoxLayout()
-        left.setSpacing(6)
+        left.setSpacing(4)
 
         eyebrow = QLabel("SECURE ACCESS")
         eyebrow.setObjectName("SectionEyebrow")
@@ -125,15 +125,14 @@ class TelaAcesso(QDialog):
         title.setObjectName("SectionTitle")
         left.addWidget(title)
 
-        subtitle = QLabel(
-            "Uma única suíte para Validação P9 e Consolidador Fiscal, com liberação remota e identificação da estação."
-        )
+        subtitle = QLabel("Liberação remota da estação para acesso à suíte fiscal.")
         subtitle.setWordWrap(True)
         subtitle.setObjectName("SectionText")
         left.addWidget(subtitle)
 
         chips = QHBoxLayout()
-        for txt in ["Identidade da estação", "Liberação remota", "Ambiente corporativo"]:
+        chips.setSpacing(6)
+        for txt in ["Estação identificada", "Liberação remota", "Ambiente corporativo"]:
             lb = QLabel(txt)
             lb.setObjectName("TopBadge")
             chips.addWidget(lb, 0, Qt.AlignLeft)
@@ -143,7 +142,7 @@ class TelaAcesso(QDialog):
         header.addLayout(left, 1)
 
         logo = QLabel()
-        pix = carregar_logo_vivo(110)
+        pix = carregar_logo_vivo(88)
         if pix:
             logo.setPixmap(pix)
         header.addWidget(logo, alignment=Qt.AlignTop | Qt.AlignRight)
@@ -151,23 +150,23 @@ class TelaAcesso(QDialog):
         layout.addLayout(header)
 
         row = QHBoxLayout()
-        row.setSpacing(16)
+        row.setSpacing(12)
 
         info_card = QFrame()
-        info_card.setObjectName("AccentPanel")
+        info_card.setObjectName("SoftCard")
         info_layout = QVBoxLayout(info_card)
-        info_layout.setContentsMargins(18, 16, 18, 16)
-        info_layout.setSpacing(6)
+        info_layout.setContentsMargins(16, 14, 16, 14)
+        info_layout.setSpacing(5)
 
-        lb1 = QLabel("LOGADO COMO")
+        lb1 = QLabel("USUÁRIO")
         lb1.setObjectName("SectionEyebrow")
         info_layout.addWidget(lb1)
 
-        val_user = QLabel(self.usuario_windows)
-        val_user.setObjectName("MetricValue")
-        info_layout.addWidget(val_user)
+        self.lb_nome = QLabel(self.usuario_windows)
+        self.lb_nome.setObjectName("AccessMainName")
+        info_layout.addWidget(self.lb_nome)
 
-        val_machine = QLabel(f"Estação: {self.nome_maquina}")
+        val_machine = QLabel(self.nome_maquina)
         val_machine.setObjectName("FieldText")
         val_machine.setWordWrap(True)
         info_layout.addWidget(val_machine)
@@ -177,19 +176,27 @@ class TelaAcesso(QDialog):
         id_card = QFrame()
         id_card.setObjectName("SoftCard")
         id_layout = QVBoxLayout(id_card)
-        id_layout.setContentsMargins(18, 16, 18, 16)
-        id_layout.setSpacing(6)
+        id_layout.setContentsMargins(16, 14, 16, 14)
+        id_layout.setSpacing(5)
 
         lb2 = QLabel("ID DA ESTAÇÃO")
         lb2.setObjectName("SectionEyebrow")
         id_layout.addWidget(lb2)
 
-        self.id_lbl = QLabel(self.machine_id[:26] + "...")
-        self.id_lbl.setObjectName("InfoValue")
-        self.id_lbl.setWordWrap(True)
-        id_layout.addWidget(self.id_lbl)
+        self.lb_hash = QLabel()
+        self.lb_hash.setObjectName("HashValue")
+        self.lb_hash.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        sub_id = QLabel("Identificador criptográfico da máquina para controle de acesso.")
+        hash_curto = (
+            f"{self.machine_id[:18]}...{self.machine_id[-8:]}"
+            if len(self.machine_id) > 28 else self.machine_id
+        )
+        self.lb_hash.setText(hash_curto)
+        self.lb_hash.setToolTip(self.machine_id)
+        self.lb_hash.setWordWrap(False)
+        id_layout.addWidget(self.lb_hash)
+
+        sub_id = QLabel("Passe o mouse para ver o hash completo.")
         sub_id.setObjectName("FieldText")
         sub_id.setWordWrap(True)
         id_layout.addWidget(sub_id)
@@ -201,19 +208,19 @@ class TelaAcesso(QDialog):
         status_card = QFrame()
         status_card.setObjectName("GlassCard")
         status_layout = QVBoxLayout(status_card)
-        status_layout.setContentsMargins(18, 16, 18, 16)
-        status_layout.setSpacing(6)
+        status_layout.setContentsMargins(16, 14, 16, 14)
+        status_layout.setSpacing(5)
 
         lb3 = QLabel("STATUS DA LIBERAÇÃO")
         lb3.setObjectName("SectionEyebrow")
         status_layout.addWidget(lb3)
 
         self.lbl_status = QLabel("Verificando acesso...")
-        self.lbl_status.setObjectName("InfoValue")
+        self.lbl_status.setObjectName("AccessStatusValue")
         self.lbl_status.setWordWrap(True)
         status_layout.addWidget(self.lbl_status)
 
-        foot = QLabel("A aprovação é refletida em tempo real assim que a solicitação for tratada.")
+        foot = QLabel("Assim que a solicitação for aprovada, a suíte será aberta automaticamente.")
         foot.setObjectName("FieldText")
         foot.setWordWrap(True)
         status_layout.addWidget(foot)
@@ -221,17 +228,17 @@ class TelaAcesso(QDialog):
         layout.addWidget(status_card)
 
         botoes = QHBoxLayout()
-        botoes.setSpacing(10)
+        botoes.setSpacing(8)
 
         self.btn_solicitar = QPushButton("Solicitar liberação")
         self.btn_solicitar.setObjectName("PrimaryButton")
-        self.btn_solicitar.setMinimumHeight(44)
+        self.btn_solicitar.setMinimumHeight(36)
         self.btn_solicitar.clicked.connect(self.solicitar_acesso)
         botoes.addWidget(self.btn_solicitar)
 
         self.btn_fechar = QPushButton("Fechar")
         self.btn_fechar.setObjectName("SecondaryButton")
-        self.btn_fechar.setMinimumHeight(44)
+        self.btn_fechar.setMinimumHeight(36)
         self.btn_fechar.clicked.connect(self.reject)
         botoes.addWidget(self.btn_fechar)
 
@@ -241,7 +248,7 @@ class TelaAcesso(QDialog):
     def _animar_entrada(self):
         self.setWindowOpacity(0.0)
         self.anim = QPropertyAnimation(self, b"windowOpacity")
-        self.anim.setDuration(280)
+        self.anim.setDuration(240)
         self.anim.setStartValue(0.0)
         self.anim.setEndValue(1.0)
         self.anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -250,11 +257,11 @@ class TelaAcesso(QDialog):
     def _set_status(self, texto, erro=False):
         if erro:
             self.lbl_status.setStyleSheet(
-                "color:#C64369;font-size:14px;font-weight:700;background:transparent;"
+                "color:#C54B68;font-size:12px;font-weight:600;background:transparent;"
             )
         else:
             self.lbl_status.setStyleSheet(
-                "color:#241B31;font-size:14px;font-weight:700;background:transparent;"
+                "color:#425166;font-size:12px;font-weight:600;background:transparent;"
             )
         self.lbl_status.setText(texto)
 
@@ -270,7 +277,7 @@ class TelaAcesso(QDialog):
             if status == "aprovado":
                 self.acesso_liberado = True
                 self._set_status("Acesso aprovado. Abrindo suíte...")
-                QTimer.singleShot(600, self.accept)
+                QTimer.singleShot(500, self.accept)
                 return
 
             if status == "negado":
@@ -318,7 +325,7 @@ class TelaAcesso(QDialog):
                 self._polling = False
                 self.acesso_liberado = True
                 self._set_status("Acesso aprovado. Abrindo suíte...")
-                QTimer.singleShot(600, self.accept)
+                QTimer.singleShot(500, self.accept)
                 return
 
             if status == "negado":

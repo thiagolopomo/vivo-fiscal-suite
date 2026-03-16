@@ -6,12 +6,13 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QFileDialog, QMessageBox, QLineEdit, QTextEdit, QProgressBar
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
+    QFrame, QFileDialog, QMessageBox, QTextEdit, QSizePolicy, QProgressBar,
+    QBoxLayout
 )
 
 from workers.consolidator_worker import ConsolidatorProcessWorker, ConsolidatorExportWorker
-from pages.p9_page import PathCard, MetricBox
+from pages.p9_page import PathCard, MetricBox, HoverCard
 
 
 class ConsolidatorPage(QWidget):
@@ -25,29 +26,30 @@ class ConsolidatorPage(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(16)
+        root.setSpacing(10)
 
         card = QFrame()
         card.setObjectName("PageCard")
         root.addWidget(card)
 
         outer = QVBoxLayout(card)
-        outer.setContentsMargins(22, 22, 22, 22)
-        outer.setSpacing(18)
+        outer.setContentsMargins(18, 18, 18, 18)
+        outer.setSpacing(12)
 
         header = QVBoxLayout()
-        header.setSpacing(5)
+        header.setSpacing(4)
 
-        lb1 = QLabel("TXT CONSOLIDATION")
+        lb1 = QLabel("CONSOLIDAÇÃO TXT")
         lb1.setObjectName("SectionEyebrow")
         header.addWidget(lb1)
 
         lb2 = QLabel("Consolidador Fiscal")
         lb2.setObjectName("SectionTitle")
+        lb2.setWordWrap(True)
         header.addWidget(lb2)
 
         lb3 = QLabel(
-            "Prepare a base interna em parquet e depois exporte no formato ANDERSEN ou VIVO a partir do mesmo workspace."
+            "Escolha a pasta com os arquivos TXT, gere a base interna em parquet e exporte no layout necessário."
         )
         lb3.setObjectName("SectionText")
         lb3.setWordWrap(True)
@@ -55,75 +57,76 @@ class ConsolidatorPage(QWidget):
 
         outer.addLayout(header)
 
-        top = QHBoxLayout()
-        top.setSpacing(16)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setObjectName("SectionDivider")
+        outer.addWidget(divider)
+
+        self.paths_layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.paths_layout.setSpacing(12)
 
         self.card_base = PathCard(
             "BASE",
-            "Entrada TXT",
-            "Selecione a pasta com os arquivos TXT fiscais que serão processados pelo motor de consolidação.",
+            "Arquivos TXT fiscais",
+            "Selecione a pasta com os arquivos TXT de entrada.",
             "Selecionar base",
             self.selecionar_base_dir,
         )
-        top.addWidget(self.card_base, 1)
 
         self.card_destino = PathCard(
-            "EXPORT",
-            "Destino final",
-            "Escolha a pasta onde ficarão as exportações finais e saídas auxiliares.",
+            "DESTINO",
+            "Pasta de saída",
+            "Selecione a pasta onde serão salvos a base interna e os arquivos finais.",
             "Selecionar destino",
             self.selecionar_pasta_destino,
         )
-        top.addWidget(self.card_destino, 1)
 
-        outer.addLayout(top)
+        self.paths_layout.addWidget(self.card_base, 1)
+        self.paths_layout.addWidget(self.card_destino, 1)
+        outer.addLayout(self.paths_layout)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
+        self.action_row = QBoxLayout(QBoxLayout.LeftToRight)
+        self.action_row.setSpacing(10)
 
         self.btn_processar = QPushButton("Preparar base interna")
         self.btn_processar.setObjectName("PrimaryButton")
-        self.btn_processar.setMinimumHeight(46)
+        self.btn_processar.setMinimumHeight(40)
+        self.btn_processar.setMinimumWidth(180)
         self.btn_processar.clicked.connect(self.executar)
 
         self.btn_andersen = QPushButton("Exportar ANDERSEN")
         self.btn_andersen.setObjectName("SecondaryButton")
-        self.btn_andersen.setMinimumHeight(46)
+        self.btn_andersen.setMinimumHeight(40)
+        self.btn_andersen.setMinimumWidth(165)
         self.btn_andersen.setEnabled(False)
         self.btn_andersen.clicked.connect(self.exportar_andersen)
 
         self.btn_vivo = QPushButton("Exportar VIVO")
         self.btn_vivo.setObjectName("GhostButton")
-        self.btn_vivo.setMinimumHeight(46)
+        self.btn_vivo.setMinimumHeight(40)
+        self.btn_vivo.setMinimumWidth(145)
         self.btn_vivo.setEnabled(False)
         self.btn_vivo.clicked.connect(self.exportar_vivo)
 
-        action_row.addWidget(self.btn_processar)
-        action_row.addWidget(self.btn_andersen)
-        action_row.addWidget(self.btn_vivo)
-        action_row.addStretch()
+        self.action_row.addWidget(self.btn_processar, 0)
+        self.action_row.addWidget(self.btn_andersen, 0)
+        self.action_row.addWidget(self.btn_vivo, 0)
+        self.action_row.addStretch(1)
 
-        outer.addLayout(action_row)
+        outer.addLayout(self.action_row)
 
-        body = QHBoxLayout()
-        body.setSpacing(16)
-        outer.addLayout(body, 1)
+        self.exec_card = HoverCard()
+        self.exec_card.setObjectName("PremiumExecCard")
+        exec_layout = QVBoxLayout(self.exec_card)
+        exec_layout.setContentsMargins(14, 12, 14, 12)
+        exec_layout.setSpacing(8)
 
-        left = QVBoxLayout()
-        left.setSpacing(14)
-        body.addLayout(left, 7)
+        e_acc = QFrame()
+        e_acc.setObjectName("CardAccentLine")
+        e_acc.setFixedHeight(2)
+        exec_layout.addWidget(e_acc)
 
-        right = QVBoxLayout()
-        right.setSpacing(14)
-        body.addLayout(right, 4)
-
-        exec_card = QFrame()
-        exec_card.setObjectName("GlassCard")
-        exec_layout = QVBoxLayout(exec_card)
-        exec_layout.setContentsMargins(18, 16, 18, 16)
-        exec_layout.setSpacing(10)
-
-        e1 = QLabel("PROCESS FLOW")
+        e1 = QLabel("ANDAMENTO")
         e1.setObjectName("SectionEyebrow")
         exec_layout.addWidget(e1)
 
@@ -135,52 +138,120 @@ class ConsolidatorPage(QWidget):
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self.progress.setFixedHeight(16)
         exec_layout.addWidget(self.progress)
 
         self.progresso_texto = QLabel("0 / 0")
         self.progresso_texto.setObjectName("FieldText")
         exec_layout.addWidget(self.progresso_texto)
 
-        left.addWidget(exec_card)
+        self.bottom_layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.bottom_layout.setSpacing(12)
 
-        stream_card = QFrame()
-        stream_card.setObjectName("SoftCard")
-        stream_layout = QVBoxLayout(stream_card)
-        stream_layout.setContentsMargins(18, 16, 18, 16)
-        stream_layout.setSpacing(10)
+        self.left_col = QVBoxLayout()
+        self.left_col.setSpacing(12)
 
-        st1 = QLabel("EXPORT / OUTPUT")
+        self.left_col.addWidget(self.exec_card)
+
+        self.stream_card = HoverCard()
+        self.stream_card.setObjectName("PremiumLogCard")
+        self.stream_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        stream_layout = QVBoxLayout(self.stream_card)
+        stream_layout.setContentsMargins(14, 12, 14, 12)
+        stream_layout.setSpacing(8)
+
+        st_acc = QFrame()
+        st_acc.setObjectName("CardAccentLine")
+        st_acc.setFixedHeight(2)
+        stream_layout.addWidget(st_acc)
+
+        st1 = QLabel("SAÍDA DO PROCESSO")
         st1.setObjectName("SectionEyebrow")
         stream_layout.addWidget(st1)
 
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
-        self.saida.setPlaceholderText("Logs do processamento e exportações aparecerão aqui.")
-        self.saida.setMinimumHeight(300)
+        self.saida.setPlaceholderText("Os logs do processamento e da exportação aparecerão aqui.")
+        self.saida.setMinimumHeight(130)
+        self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         stream_layout.addWidget(self.saida, 1)
 
-        left.addWidget(stream_card, 1)
+        self.left_col.addWidget(self.stream_card, 1)
 
-        summary = QFrame()
-        summary.setObjectName("SoftCard")
-        sum_layout = QVBoxLayout(summary)
-        sum_layout.setContentsMargins(18, 16, 18, 16)
-        sum_layout.setSpacing(12)
+        self.summary = HoverCard()
+        self.summary.setObjectName("PremiumSummaryCard")
+        self.summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.summary.setMinimumWidth(250)
 
-        sm1 = QLabel("SESSION SUMMARY")
+        summary_layout = QVBoxLayout(self.summary)
+        summary_layout.setContentsMargins(12, 10, 12, 10)
+        summary_layout.setSpacing(6)
+
+        sm_acc = QFrame()
+        sm_acc.setObjectName("CardAccentLine")
+        sm_acc.setFixedHeight(2)
+        summary_layout.addWidget(sm_acc)
+
+        sm1 = QLabel("RESUMO")
         sm1.setObjectName("SectionEyebrow")
-        sum_layout.addWidget(sm1)
+        summary_layout.addWidget(sm1)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
 
         self.metric_tipo = MetricBox("Tipo detectado")
         self.metric_linhas = MetricBox("Linhas")
         self.metric_base = MetricBox("Base interna", "Nenhuma base processada")
 
-        sum_layout.addWidget(self.metric_tipo)
-        sum_layout.addWidget(self.metric_linhas)
-        sum_layout.addWidget(self.metric_base)
-        sum_layout.addStretch(1)
+        grid.addWidget(self.metric_tipo, 0, 0)
+        grid.addWidget(self.metric_linhas, 1, 0)
+        grid.addWidget(self.metric_base, 2, 0)
 
-        right.addWidget(summary)
+        summary_layout.addLayout(grid)
+        summary_layout.addStretch(1)
+
+        left_wrap = QWidget()
+        left_wrap.setLayout(self.left_col)
+        left_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.bottom_layout.addWidget(left_wrap, 8)
+        self.bottom_layout.addWidget(self.summary, 3)
+
+        outer.addLayout(self.bottom_layout, 1)
+
+        self._apply_responsive_mode()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_mode()
+
+    def _apply_responsive_mode(self):
+        w = self.width()
+
+        if w < 980:
+            self.paths_layout.setDirection(QBoxLayout.TopToBottom)
+        else:
+            self.paths_layout.setDirection(QBoxLayout.LeftToRight)
+
+        if w < 1120:
+            self.action_row.setDirection(QBoxLayout.TopToBottom)
+            self.btn_processar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.btn_andersen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.btn_vivo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        else:
+            self.action_row.setDirection(QBoxLayout.LeftToRight)
+            self.btn_processar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.btn_andersen.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.btn_vivo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        if w < 1180:
+            self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
+            self.summary.setMinimumWidth(0)
+        else:
+            self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
+            self.summary.setMinimumWidth(250)
 
     def selecionar_base_dir(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta base com os TXT")
@@ -200,17 +271,18 @@ class ConsolidatorPage(QWidget):
 
         if etapa == "preparando":
             self.status_texto.setText("Preparando processamento...")
+            self.saida.setPlainText(detalhe)
         elif etapa == "processando_txt":
-            self.status_texto.setText("Processando TXT...")
+            self.status_texto.setText("Lendo e estruturando arquivos TXT...")
             self.saida.setPlainText(detalhe)
         elif etapa == "consolidando":
-            self.status_texto.setText("Consolidando shards...")
+            self.status_texto.setText("Consolidando dados em base interna...")
             self.saida.setPlainText(detalhe)
         elif etapa == "finalizado":
-            self.status_texto.setText("Processamento concluído.")
+            self.status_texto.setText("Base interna pronta.")
             self.saida.setPlainText(detalhe)
         elif etapa == "exportando_csv":
-            self.status_texto.setText("Exportando arquivo...")
+            self.status_texto.setText("Gerando exportação final...")
             self.saida.setPlainText(detalhe)
         elif etapa == "finalizado_csv":
             self.status_texto.setText("Exportação concluída.")

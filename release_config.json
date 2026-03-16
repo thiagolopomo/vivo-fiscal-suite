@@ -1,6 +1,6 @@
 {
-    "version":  "2.1.1",
-    "notes":  "Update de versão 2.1.1",
+    "version":  "2.1.4",
+    "notes":  "Correções visuais e setup automatizado",
     "mandatory":  false,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"

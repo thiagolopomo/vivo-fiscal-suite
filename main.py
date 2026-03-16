@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import time
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QTimer
@@ -12,7 +13,6 @@ from splash import SplashScreen
 from access import TelaAcesso
 from shell import MainShell
 
-from app_info import APP_VERSION, UPDATE_MANIFEST_URL
 from update_service import (
     check_for_update,
     download_update_package,
@@ -21,11 +21,20 @@ from update_service import (
 from update_dialog import UpdateDialog
 from updater_client import iniciar_instalacao_update
 
+T0 = time.perf_counter()
+
+
+def log_tempo(etapa: str):
+    print(f"[TEMPO] {etapa}: {time.perf_counter() - T0:.3f}s")
+
 
 def verificar_atualizacao(shell):
     from PySide6.QtWidgets import QMessageBox, QProgressDialog, QApplication
 
+    log_tempo("início verificar_atualizacao")
+
     info = check_for_update()
+    log_tempo("fim check_for_update")
 
     if info.get("error"):
         QMessageBox.critical(shell, "Erro no update", str(info["error"]))
@@ -42,6 +51,8 @@ def verificar_atualizacao(shell):
         parent=shell
     )
 
+    log_tempo("antes dialog update")
+
     if dlg.exec() == UpdateDialog.Accepted:
         try:
             progresso = QProgressDialog("Baixando atualização...", None, 0, 100, shell)
@@ -56,9 +67,11 @@ def verificar_atualizacao(shell):
 
             def on_download_progress(recebido, total):
                 if total > 0:
-                    pct = int((recebido / total) * 50)  # download = 0 a 50
+                    pct = int((recebido / total) * 50)
                     progresso.setValue(min(pct, 50))
-                    progresso.setLabelText(f"Baixando atualização... {int((recebido / total) * 100)}%")
+                    progresso.setLabelText(
+                        f"Baixando atualização... {int((recebido / total) * 100)}%"
+                    )
                 else:
                     progresso.setValue(0)
                     progresso.setLabelText("Baixando atualização...")
@@ -69,9 +82,10 @@ def verificar_atualizacao(shell):
                 expected_sha256=info.get("sha256", ""),
                 progress_callback=on_download_progress
             )
+            log_tempo("fim download_update_package")
 
             def on_extract_progress(done_bytes, total_bytes, current_name):
-                pct_extract = int((done_bytes / total_bytes) * 50)  # extração = 50 a 100
+                pct_extract = int((done_bytes / total_bytes) * 50)
                 pct_total = 50 + pct_extract
                 progresso.setValue(min(pct_total, 100))
                 progresso.setLabelText(f"Preparando instalação... {current_name}")
@@ -81,12 +95,14 @@ def verificar_atualizacao(shell):
                 zip_path=zip_path,
                 progress_callback=on_extract_progress
             )
+            log_tempo("fim extract_update_package")
 
             progresso.setValue(100)
             progresso.setLabelText("Concluindo preparação da atualização...")
             QApplication.processEvents()
 
             iniciar_instalacao_update(extracted_dir, parent=shell)
+            log_tempo("fim iniciar_instalacao_update")
 
             progresso.close()
             QApplication.processEvents()
@@ -100,38 +116,75 @@ def verificar_atualizacao(shell):
 
 
 def main():
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    log_tempo("início main")
 
     app = QApplication(sys.argv)
+    log_tempo("QApplication criada")
 
     familia = carregar_fontes_app()
+    log_tempo("carregar_fontes_app")
+
     app.setStyleSheet(build_app_qss(familia))
+    log_tempo("build_app_qss + setStyleSheet")
 
     icone = obter_icone()
+    log_tempo("obter_icone")
+
     app.setWindowIcon(icone)
+    log_tempo("setWindowIcon app")
 
     splash = SplashScreen()
-    shell = MainShell()
-    shell.setWindowIcon(icone)
+    log_tempo("SplashScreen criada")
+
+    shell = None
 
     def abrir_fluxo():
-        acesso = TelaAcesso()
-        acesso.setWindowIcon(icone)
+        nonlocal shell
 
-        if acesso.exec() == TelaAcesso.Accepted and acesso.acesso_liberado:
+        log_tempo("início abrir_fluxo")
+
+        t_acesso = time.perf_counter()
+        acesso = TelaAcesso()
+        print(f"[TEMPO] TelaAcesso criada em: {time.perf_counter() - t_acesso:.3f}s")
+
+        acesso.setWindowIcon(icone)
+        log_tempo("setWindowIcon acesso")
+
+        t_exec = time.perf_counter()
+        result = acesso.exec()
+        print(f"[TEMPO] acesso.exec() terminou em: {time.perf_counter() - t_exec:.3f}s")
+
+        if result == TelaAcesso.Accepted and acesso.acesso_liberado:
+            log_tempo("TelaAcesso aceita")
+
+            t_shell = time.perf_counter()
+            shell = MainShell()
+            print(f"[TEMPO] MainShell criado pós-acesso em: {time.perf_counter() - t_shell:.3f}s")
+
+            shell.setWindowIcon(icone)
+            log_tempo("setWindowIcon shell")
+
             shell.set_user_context(
                 usuario=acesso.usuario_windows,
                 maquina=acesso.nome_maquina,
                 machine_id=acesso.machine_id
             )
+            log_tempo("set_user_context")
+
             shell.show()
+            log_tempo("shell.show")
+
+            shell.showMaximized()
+            log_tempo("shell.showMaximized")
 
             QTimer.singleShot(700, lambda: verificar_atualizacao(shell))
         else:
+            log_tempo("TelaAcesso recusada/fechada")
             app.quit()
 
     splash.iniciar(abrir_fluxo)
+    log_tempo("splash.iniciar")
+
     sys.exit(app.exec())
 
 
