@@ -117,13 +117,27 @@ $newVersion = "$maj.$min.$pat"
 Write-Step "Nova versão calculada: $newVersion"
 
 Write-Step "Validando se tag já existe"
+
 $existingTag = git tag -l "v$newVersion"
 if ($existingTag) {
     throw "A tag v$newVersion já existe localmente. Escolha outra versão."
 }
 
-$remoteTagExists = gh release view "v$newVersion" --json tagName --jq ".tagName" 2>$null
-if ($LASTEXITCODE -eq 0 -and $remoteTagExists -eq "v$newVersion") {
+$remoteTagExists = $null
+$oldEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+
+try {
+    $remoteTagExists = gh release view "v$newVersion" --json tagName --jq ".tagName" 2>$null
+}
+catch {
+    $remoteTagExists = $null
+}
+finally {
+    $ErrorActionPreference = $oldEAP
+}
+
+if ($remoteTagExists -eq "v$newVersion") {
     throw "A release v$newVersion já existe no GitHub."
 }
 
