@@ -185,11 +185,16 @@ Write-Step "Preparando commit"
 
 git add -A
 
-git restore --staged installer_output 2>$null
-git restore --staged dist 2>$null
-git restore --staged build 2>$null
-git restore --staged package 2>$null
-git restore --staged package.zip 2>$null
+$stagedNow = @(git diff --cached --name-only)
+
+if ($stagedNow -contains "package.zip") {
+    git restore --staged -- "package.zip"
+}
+
+if ($stagedNow | Where-Object { $_ -like "installer_output/*" }) {
+    git restore --staged --worktree --source=HEAD -- installer_output 2>$null
+    git restore --staged -- installer_output 2>$null
+}
 
 # impedir arquivos grandes no commit
 $largeFiles = git diff --cached --name-only | Where-Object {
