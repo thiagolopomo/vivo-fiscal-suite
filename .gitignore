@@ -16,6 +16,7 @@ dist/
 # Release artifacts
 package/
 package.zip
+installer_output/
 
 # Updater build artifacts
 assets/updates/build/
