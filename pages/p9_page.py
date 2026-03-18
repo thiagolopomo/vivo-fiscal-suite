@@ -4,7 +4,7 @@
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QEasingCurve, QPropertyAnimation, QPointF, QTimer
+from PySide6.QtCore import Qt, QEasingCurve, QPropertyAnimation, QPointF
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFrame,
@@ -74,12 +74,11 @@ class HoverCard(QFrame):
         super().leaveEvent(event)
 
 
-class ResponsiveMetricGrid(QWidget):
-    def __init__(self, min_item_width=170, parent=None):
+class ResponsiveGrid(QWidget):
+    def __init__(self, min_item_width=220, parent=None):
         super().__init__(parent)
         self.min_item_width = min_item_width
         self.items = []
-        self.forced_cols = None
         self._current_cols = None
 
         self._layout = QGridLayout(self)
@@ -87,59 +86,121 @@ class ResponsiveMetricGrid(QWidget):
         self._layout.setHorizontalSpacing(8)
         self._layout.setVerticalSpacing(8)
 
-    def addMetric(self, widget):
-        self.items.append(widget)
-        self._rebuild(force=True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-    def setForcedColumns(self, cols=None):
-        if self.forced_cols == cols:
-            return
-        self.forced_cols = cols
+    def addItemWidget(self, widget):
+        self.items.append(widget)
         self._rebuild(force=True)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._rebuild()
+        self._rebuild(force=False)
 
-    def _compute_cols(self):
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        if not self.items:
+            return 0
+
+        cols = max(1, min(len(self.items), width // max(1, self.min_item_width)))
+
+        row_heights = []
+        for i, w in enumerate(self.items):
+            row = i // cols
+            hint_h = max(w.minimumSizeHint().height(), w.sizeHint().height())
+            if row >= len(row_heights):
+                row_heights.append(hint_h)
+            else:
+                row_heights[row] = max(row_heights[row], hint_h)
+
+        margins = self._layout.contentsMargins()
+        total = margins.top() + margins.bottom()
+        total += sum(row_heights)
+
+        if len(row_heights) > 1:
+            total += self._layout.verticalSpacing() * (len(row_heights) - 1)
+
+        return total
+
+    def sizeHint(self):
+        w = max(1, self.width())
+        if w <= 1:
+            w = self.min_item_width * max(1, len(self.items))
+        return self.minimumSizeHint()
+
+    def minimumSizeHint(self):
+        w = max(1, self.width())
+        if w <= 1:
+            w = self.min_item_width * max(1, len(self.items))
+        return self.sizeHintForWidth(w)
+
+    def sizeHintForWidth(self, width):
+        h = self.heightForWidth(width)
+        return self._layout.geometry().size().expandedTo(self.minimumSize()).grownBy(
+            self.contentsMargins()
+        ) if h <= 0 else self._fallback_size(width, h)
+
+    def _fallback_size(self, width, height):
+        from PySide6.QtCore import QSize
+        return QSize(width, height)
+
+    def _calc_cols(self):
         if not self.items:
             return 1
 
-        if self.forced_cols is not None:
-            return max(1, min(self.forced_cols, len(self.items)))
-
         width = max(1, self.width())
-        cols = max(1, width // self.min_item_width)
+        parent_w = self.parentWidget().width() if self.parentWidget() else width
+
+        # Quando o container do resumo fica largo em telas 100%,
+        # empilha os cards para aproveitar melhor a altura/largura visual.
+        if parent_w >= 430:
+            return 1
+
+        cols = max(1, width // max(1, self.min_item_width))
         return min(cols, len(self.items))
+
+    def _clear_layout_only(self):
+        while self._layout.count():
+            self._layout.takeAt(0)
 
     def _rebuild(self, force=False):
         if not self.items:
+            self.setMinimumHeight(0)
+            self.updateGeometry()
             return
 
-        cols = self._compute_cols()
+        cols = self._calc_cols()
 
         if not force and cols == self._current_cols:
+            h = self.heightForWidth(max(1, self.width()))
+            self.setMinimumHeight(h)
+            self.updateGeometry()
             return
 
         self._current_cols = cols
-
-        while self._layout.count():
-            self._layout.takeAt(0)
+        self._clear_layout_only()
 
         for i, w in enumerate(self.items):
             row = i // cols
             col = i % cols
             self._layout.addWidget(w, row, col)
 
+        self._layout.activate()
+
+        h = self.heightForWidth(max(1, self.width()))
+        self.setMinimumHeight(h)
         self.updateGeometry()
+
 
 class PathCard(HoverCard):
     def __init__(self, eyebrow, titulo, subtitulo, texto_botao, on_click):
         super().__init__()
 
         self.setObjectName("PremiumPathCard")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.setMinimumHeight(220)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setMinimumHeight(168)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -147,6 +208,7 @@ class PathCard(HoverCard):
 
         accent = QFrame()
         accent.setObjectName("CardAccentLine")
+        accent.setAttribute(Qt.WA_StyledBackground, True)
         accent.setFixedHeight(2)
         layout.addWidget(accent)
 
@@ -199,9 +261,10 @@ class MetricBox(QFrame):
         super().__init__()
 
         self.setObjectName("PremiumMetricBox")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setMinimumHeight(74)
-        self.setMaximumHeight(74)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.setMinimumHeight(68)
+        self.setMaximumHeight(96)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
@@ -209,13 +272,14 @@ class MetricBox(QFrame):
 
         accent = QFrame()
         accent.setObjectName("MetricAccentLine")
+        accent.setAttribute(Qt.WA_StyledBackground, True)
         accent.setFixedHeight(1)
         layout.addWidget(accent)
 
-        lb_t = QLabel(titulo)
-        lb_t.setObjectName("MetricTitle")
-        lb_t.setWordWrap(True)
-        layout.addWidget(lb_t)
+        self.lb_t = QLabel(titulo)
+        self.lb_t.setObjectName("MetricTitle")
+        self.lb_t.setWordWrap(True)
+        layout.addWidget(self.lb_t)
 
         self.lb_v = QLabel(valor)
         self.lb_v.setObjectName("MetricValue")
@@ -230,13 +294,9 @@ class P9Page(QWidget):
         super().__init__()
         self.worker = None
 
-        self._resize_timer = QTimer(self)
-        self._resize_timer.setSingleShot(True)
-        self._resize_timer.timeout.connect(self._apply_responsive_mode)
-
         self._last_layout_mode = None
         self._last_action_mode = None
-        self._last_metric_cols = None
+        self._last_paths_mode = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -244,11 +304,13 @@ class P9Page(QWidget):
 
         card = QFrame()
         card.setObjectName("PageCard")
-        root.addWidget(card)
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        root.addWidget(card, 1)
 
         outer = QVBoxLayout(card)
-        outer.setContentsMargins(18, 18, 18, 18)
-        outer.setSpacing(12)
+        outer.setContentsMargins(14, 14, 14, 14)
+        outer.setSpacing(8)
 
         header = QVBoxLayout()
         header.setSpacing(4)
@@ -270,8 +332,9 @@ class P9Page(QWidget):
         outer.addLayout(header)
 
         divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
         divider.setObjectName("SectionDivider")
+        divider.setAttribute(Qt.WA_StyledBackground, True)
+        divider.setFixedHeight(1)
         outer.addWidget(divider)
 
         self.paths_layout = QBoxLayout(QBoxLayout.LeftToRight)
@@ -298,31 +361,35 @@ class P9Page(QWidget):
         outer.addLayout(self.paths_layout)
 
         self.action_row = QBoxLayout(QBoxLayout.LeftToRight)
-        self.action_row.setSpacing(10)
+        self.action_row.setSpacing(8)
+        self.action_row.setContentsMargins(0, 0, 0, 0)
 
         self.run_btn = QPushButton("Executar validação")
         self.run_btn.setObjectName("PrimaryButton")
-        self.run_btn.setMinimumHeight(40)
-        self.run_btn.setMinimumWidth(185)
+        self.run_btn.setMinimumHeight(36)
+        self.run_btn.setMaximumHeight(40)
+        self.run_btn.setMinimumWidth(150)
+        self.run_btn.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
         self.run_btn.clicked.connect(self.executar)
 
         self.action_row.addWidget(self.run_btn, 0)
         self.action_row.addStretch(1)
-
         outer.addLayout(self.action_row)
 
         self.exec_card = HoverCard()
         self.exec_card.setObjectName("PremiumExecCard")
-        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.exec_card.setMinimumHeight(132)
-        self.exec_card.setMaximumHeight(190)
+        self.exec_card.setAttribute(Qt.WA_StyledBackground, True)
+        self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.exec_card.setMinimumHeight(96)
+        self.exec_card.setMaximumHeight(145)
 
         exec_layout = QVBoxLayout(self.exec_card)
-        exec_layout.setContentsMargins(14, 12, 14, 12)
-        exec_layout.setSpacing(8)
+        exec_layout.setContentsMargins(10, 8, 10, 8)
+        exec_layout.setSpacing(4)
 
         e_acc = QFrame()
         e_acc.setObjectName("CardAccentLine")
+        e_acc.setAttribute(Qt.WA_StyledBackground, True)
         e_acc.setFixedHeight(2)
         exec_layout.addWidget(e_acc)
 
@@ -346,24 +413,33 @@ class P9Page(QWidget):
         exec_layout.addWidget(self.progresso_texto)
 
         self.bottom_layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.bottom_layout.setContentsMargins(0, 0, 0, 0)
         self.bottom_layout.setSpacing(12)
 
-        self.left_col = QVBoxLayout()
+        self.left_panel = QFrame()
+        self.left_panel.setObjectName("TransparentPanel")
+        self.left_panel.setAttribute(Qt.WA_StyledBackground, True)
+        self.left_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+
+        self.left_col = QVBoxLayout(self.left_panel)
+        self.left_col.setContentsMargins(0, 0, 0, 0)
         self.left_col.setSpacing(12)
 
         self.left_col.addWidget(self.exec_card, 0)
 
         self.log_card = HoverCard()
         self.log_card.setObjectName("PremiumLogCard")
-        self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.log_card.setMinimumHeight(180)
+        self.log_card.setAttribute(Qt.WA_StyledBackground, True)
+        self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.log_card.setMinimumHeight(110)
 
         log_layout = QVBoxLayout(self.log_card)
-        log_layout.setContentsMargins(14, 12, 14, 12)
-        log_layout.setSpacing(8)
+        log_layout.setContentsMargins(10, 8, 10, 8)
+        log_layout.setSpacing(6)
 
         lg_acc = QFrame()
         lg_acc.setObjectName("CardAccentLine")
+        lg_acc.setAttribute(Qt.WA_StyledBackground, True)
         lg_acc.setFixedHeight(2)
         log_layout.addWidget(lg_acc)
 
@@ -374,24 +450,27 @@ class P9Page(QWidget):
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
         self.saida.setPlaceholderText("A saída do processamento aparecerá aqui.")
-        self.saida.setMinimumHeight(0)
-        self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.saida.setMinimumHeight(60)
+        self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
         log_layout.addWidget(self.saida, 1)
 
         self.left_col.addWidget(self.log_card, 1)
 
         self.summary = HoverCard()
         self.summary.setObjectName("PremiumSummaryCard")
-        self.summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        self.summary.setMinimumWidth(300)
-        self.summary.setMaximumWidth(360)
+        self.summary.setAttribute(Qt.WA_StyledBackground, True)
+        self.summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.summary.setMinimumWidth(260)
+        self.summary.setMaximumWidth(340)
+        self.summary.setMinimumHeight(150)
 
         summary_layout = QVBoxLayout(self.summary)
-        summary_layout.setContentsMargins(12, 10, 12, 10)
-        summary_layout.setSpacing(8)
+        summary_layout.setContentsMargins(10, 8, 10, 8)
+        summary_layout.setSpacing(6)
 
         sm_acc = QFrame()
         sm_acc.setObjectName("CardAccentLine")
+        sm_acc.setAttribute(Qt.WA_StyledBackground, True)
         sm_acc.setFixedHeight(2)
         summary_layout.addWidget(sm_acc)
 
@@ -399,69 +478,101 @@ class P9Page(QWidget):
         sm1.setObjectName("SectionEyebrow")
         summary_layout.addWidget(sm1)
 
-        self.metric_grid = ResponsiveMetricGrid(min_item_width=170)
+        self.metric_grid = ResponsiveGrid(min_item_width=170)
+        self.metric_grid.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         self.metric_pdfs = MetricBox("PDFs processados")
         self.metric_cfop = MetricBox("Linhas CFOP")
         self.metric_resumo = MetricBox("Linhas resumo")
 
-        self.metric_grid.addMetric(self.metric_pdfs)
-        self.metric_grid.addMetric(self.metric_cfop)
-        self.metric_grid.addMetric(self.metric_resumo)
+        self.metric_grid.addItemWidget(self.metric_pdfs)
+        self.metric_grid.addItemWidget(self.metric_cfop)
+        self.metric_grid.addItemWidget(self.metric_resumo)
 
         summary_layout.addWidget(self.metric_grid)
-        summary_layout.addStretch(1)
 
-        left_wrap = QWidget()
-        left_wrap.setLayout(self.left_col)
-        left_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        self.bottom_layout.addWidget(left_wrap, 1)
+        self.bottom_layout.addWidget(self.left_panel, 1)
         self.bottom_layout.addWidget(self.summary, 0)
-
         outer.addLayout(self.bottom_layout, 1)
 
         self._apply_responsive_mode()
+        self._apply_scale_mode()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._resize_timer.start(30)
+        self._apply_responsive_mode()
+        self._apply_scale_mode()
+        self._sync_summary_height()
+
+    def _sync_summary_height(self):
+        self.metric_grid._rebuild(force=True)
+        self.metric_grid.updateGeometry()
+
+        self.summary.layout().activate()
+        self.summary.adjustSize()
+
+        margins = self.summary.layout().contentsMargins()
+        spacing = self.summary.layout().spacing()
+
+        total_h = (
+            margins.top()
+            + margins.bottom()
+            + 2
+            + self.summary.layout().itemAt(1).sizeHint().height()
+            + spacing * 2
+            + self.metric_grid.minimumSizeHint().height()
+            + 10
+        )
+
+        self.summary.setMinimumHeight(max(150, total_h))
+        self.summary.updateGeometry()
+
+    
 
     def _apply_responsive_mode(self):
         w = self.width()
+        h = self.height()
 
         paths_vertical = w < 920
         action_vertical = w < 700
         bottom_vertical = w < 980
+        compact = h < 760
 
-        if w < 760:
-            metric_cols = 1
-        elif w < 1180:
-            metric_cols = 2 if bottom_vertical else 1
-        else:
-            metric_cols = 3 if bottom_vertical else 1
-
-        if self._last_layout_mode != bottom_vertical:
-            self._last_layout_mode = bottom_vertical
+        layout_state = (bottom_vertical, compact)
+        if self._last_layout_mode != layout_state:
+            self._last_layout_mode = layout_state
 
             if bottom_vertical:
                 self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
-                self.bottom_layout.setSpacing(10)
+                self.bottom_layout.setSpacing(8)
+
                 self.summary.setMinimumWidth(0)
                 self.summary.setMaximumWidth(16777215)
-                self.exec_card.setMinimumHeight(140)
-                self.exec_card.setMaximumHeight(220)
-                self.log_card.setMinimumHeight(180)
+                self.summary.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             else:
                 self.bottom_layout.setDirection(QBoxLayout.LeftToRight)
-                self.bottom_layout.setSpacing(12)
-                self.summary.setMinimumWidth(300)
-                self.summary.setMaximumWidth(360)
-                self.exec_card.setMinimumHeight(132)
-                self.exec_card.setMaximumHeight(190)
-                self.log_card.setMinimumHeight(220)
+                self.bottom_layout.setSpacing(10)
 
-        if getattr(self, "_last_paths_mode", None) != paths_vertical:
+                summary_max = max(330, min(520, int(w * 0.34)))
+
+                self.summary.setMinimumWidth(250)
+                self.summary.setMaximumWidth(summary_max)
+                self.summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+
+            if compact:
+                self.exec_card.setMinimumHeight(92)
+                self.exec_card.setMaximumHeight(132)
+                self.log_card.setMinimumHeight(108)
+                self.summary.setMinimumHeight(140)
+                self.saida.setMinimumHeight(58)
+            else:
+                self.exec_card.setMinimumHeight(96)
+                self.exec_card.setMaximumHeight(145)
+                self.log_card.setMinimumHeight(120)
+                self.summary.setMinimumHeight(150)
+                self.saida.setMinimumHeight(64)
+
+        if self._last_paths_mode != paths_vertical:
             self._last_paths_mode = paths_vertical
             self.paths_layout.setDirection(
                 QBoxLayout.TopToBottom if paths_vertical else QBoxLayout.LeftToRight
@@ -476,9 +587,55 @@ class P9Page(QWidget):
                 self.action_row.setDirection(QBoxLayout.LeftToRight)
                 self.run_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
-        if self._last_metric_cols != metric_cols:
-            self._last_metric_cols = metric_cols
-            self.metric_grid.setForcedColumns(metric_cols)
+    def _apply_scale_mode(self):
+        w = self.width()
+        h = self.height()
+
+        roomy = w >= 1280 and h >= 820
+        medium = w >= 1080 and h >= 760
+        high_scale_compact = h < 860 and w < 1500
+
+        if roomy and not high_scale_compact:
+            self.metric_grid.min_item_width = 125
+
+            for box in (self.metric_pdfs, self.metric_cfop, self.metric_resumo):
+                box.setMinimumHeight(76)
+                box.setMaximumHeight(84)
+                box.lb_t.setStyleSheet(
+                    "font-size: 10px; font-weight: 700; color: #7F8BA0; background: transparent;"
+                )
+                box.lb_v.setStyleSheet(
+                    "font-size: 13px; font-weight: 800; color: #182235; background: transparent;"
+                )
+
+        elif medium:
+            self.metric_grid.min_item_width = 138
+
+            for box in (self.metric_pdfs, self.metric_cfop, self.metric_resumo):
+                box.setMinimumHeight(72)
+                box.setMaximumHeight(80)
+                box.lb_t.setStyleSheet(
+                    "font-size: 10px; font-weight: 700; color: #7F8BA0; background: transparent;"
+                )
+                box.lb_v.setStyleSheet(
+                    "font-size: 12px; font-weight: 800; color: #182235; background: transparent;"
+                )
+
+        else:
+            self.metric_grid.min_item_width = 150
+
+            for box in (self.metric_pdfs, self.metric_cfop, self.metric_resumo):
+                box.setMinimumHeight(68)
+                box.setMaximumHeight(76)
+                box.lb_t.setStyleSheet(
+                    "font-size: 9px; font-weight: 700; color: #7F8BA0; background: transparent;"
+                )
+                box.lb_v.setStyleSheet(
+                    "font-size: 11px; font-weight: 800; color: #182235; background: transparent;"
+                )
+
+        self.metric_grid._rebuild(force=True)
+        self._sync_summary_height()
 
     def selecionar_pasta_pdfs(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta com os PDFs")
