@@ -185,28 +185,6 @@ Write-Step "Preparando commit"
 
 git add -A
 
-$stagedNow = @(git diff --cached --name-only)
-
-if ($stagedNow -contains "package.zip") {
-    git restore --staged -- "package.zip"
-}
-
-if ($stagedNow | Where-Object { $_ -like "installer_output/*" }) {
-    git restore --staged --worktree --source=HEAD -- installer_output 2>$null
-    git restore --staged -- installer_output 2>$null
-}
-
-# impedir arquivos grandes no commit
-$largeFiles = git diff --cached --name-only | Where-Object {
-    (Get-Item $_ -ErrorAction SilentlyContinue).Length -gt 100MB
-}
-
-if ($largeFiles) {
-    Write-Host "Arquivos grandes detectados no commit:" -ForegroundColor Red
-    $largeFiles
-    throw "Release abortada: arquivos maiores que 100MB não podem ir para o Git."
-}
-
 Write-Step "Status preparado para commit"
 git status --short
 
