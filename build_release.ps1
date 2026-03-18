@@ -133,8 +133,8 @@ New-Item -ItemType Directory -Path ".\package" -Force | Out-Null
 Copy-Item ".\dist\main\*" ".\package" -Recurse -Force
 
 Assert-Exists ".\package\main.exe" "main.exe no package"
-Assert-Exists ".\package\Mapeamento_CFOP.csv" "Mapeamento_CFOP.csv no package"
-Assert-Exists ".\package\Tabela_Divisao.csv" "Tabela_Divisao.csv no package"
+Assert-Exists ".\dist\main\_internal\Mapeamento_CFOP.csv" "Mapeamento_CFOP.csv no dist"
+Assert-Exists ".\dist\main\_internal\Tabela_Divisao.csv" "Tabela_Divisao.csv no dist"
 
 Write-Step "Compactando package.zip"
 Compress-Archive -Path ".\package\*" -DestinationPath ".\package.zip" -Force
