@@ -1,6 +1,6 @@
 {
-    "version":  "2.1.12",
-    "notes":  "Correções visuais e setup automatizado",
+    "version":  "2.1.13",
+    "notes":  "Atualizações visuais do dashboard, P9 e consolidator",
     "mandatory":  false,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"

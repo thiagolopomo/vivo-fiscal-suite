@@ -2,7 +2,9 @@
 #define MyAppExeName "main.exe"
 #define MyAppPublisher "Andersen"
 #define MyAppURL "https://github.com/SEU_OWNER/SEU_REPO"
-#define MyAppVersion "2.1.1"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
 #define MyAppAssocName MyAppName + " App"
 #define MyAppAssocExt ".vfs"
 #define MyAppAssocKey StringChange(MyAppAssocName, " ", "") + MyAppAssocExt
