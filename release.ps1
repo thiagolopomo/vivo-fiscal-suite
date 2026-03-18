@@ -180,8 +180,27 @@ Write-Step "Removendo artefatos pesados do índice Git"
 git rm -r --cached --ignore-unmatch dist build package assets/updates/build assets/updates/dist *> $null
 git rm --cached --ignore-unmatch package.zip assets/updates/updater.spec *> $null
 
+git rm -r --cached --ignore-unmatch installer_output *> $null
 Write-Step "Preparando commit"
+
 git add -A
+
+git restore --staged installer_output 2>$null
+git restore --staged dist 2>$null
+git restore --staged build 2>$null
+git restore --staged package 2>$null
+git restore --staged package.zip 2>$null
+
+# impedir arquivos grandes no commit
+$largeFiles = git diff --cached --name-only | Where-Object {
+    (Get-Item $_ -ErrorAction SilentlyContinue).Length -gt 100MB
+}
+
+if ($largeFiles) {
+    Write-Host "Arquivos grandes detectados no commit:" -ForegroundColor Red
+    $largeFiles
+    throw "Release abortada: arquivos maiores que 100MB não podem ir para o Git."
+}
 
 Write-Step "Status preparado para commit"
 git status --short
@@ -190,7 +209,11 @@ $hasChanges = git diff --cached --name-only
 
 if ($hasChanges) {
     git commit -m "release: v$newVersion"
+
     git push origin main
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha no git push. Release abortada."
+    }
 }
 else {
     throw "Nenhuma mudança foi preparada para commit."
