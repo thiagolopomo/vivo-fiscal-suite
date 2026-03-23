@@ -1,7 +1,7 @@
 {
-  "version": "2.1.16",
+  "version": "2.1.17",
   "mandatory": false,
-  "notes": "Página ZTMM x Livro + layout premium + correções de responsividade + updater com elevação admin",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.16/package.zip",
-  "sha256": "582773acbceea7ce22978bfbd269298e67fd2afbd96343a14599abc0a6a71df0"
+  "notes": "Card ZTMM no dashboard + ícone transparente",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.17/package.zip",
+  "sha256": "0bb88313a49592aeec161974516b6ef85d5e17778ff2ccb20845c18b4ed61231"
 }
