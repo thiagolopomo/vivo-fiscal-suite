@@ -271,10 +271,10 @@ class DashboardPage(QWidget):
 
         self.stats_wrap = ResponsiveGrid(min_item_width=210)
 
-        self.stat_modulos = StatCard("◫", "Módulos", "2")
+        self.stat_modulos = StatCard("◫", "Módulos", "3")
         self.stat_ambiente = StatCard("◩", "Ambiente", "Corporativo")
         self.stat_status = StatCard("●", "Status", "Pronto")
-        self.stat_fluxo = StatCard("◇", "Fluxo", "PDF + TXT")
+        self.stat_fluxo = StatCard("◇", "Fluxo", "PDF + TXT + SAP")
 
         self.stats_wrap.addItemWidget(self.stat_modulos)
         self.stats_wrap.addItemWidget(self.stat_ambiente)
@@ -284,7 +284,7 @@ class DashboardPage(QWidget):
         hero_layout.addWidget(self.stats_wrap)
 
         # MÓDULOS
-        self.modules_wrap = ResponsiveGrid(min_item_width=360)
+        self.modules_wrap = ResponsiveGrid(min_item_width=300)
 
         self.card_p9 = DetailCard(
             "VALIDAÇÃO P9",
@@ -310,8 +310,21 @@ class DashboardPage(QWidget):
             ]
         )
 
+        self.card_ztmm = DetailCard(
+            "ZTMM X LIVRO",
+            "SAP",
+            "Conciliação ZTMM x Livro",
+            "Consolida TXTs ZTMM do SAP, exporta por divisão e executa análise de conciliação.",
+            [
+                "Consolida arquivos TXT SAP em base interna parquet.",
+                "Exporta CSVs filtrados por divisão selecionada.",
+                "Concilia NC com ZTMM, enriquecendo com ICMS, ST e Razões.",
+            ]
+        )
+
         self.modules_wrap.addItemWidget(self.card_p9)
         self.modules_wrap.addItemWidget(self.card_con)
+        self.modules_wrap.addItemWidget(self.card_ztmm)
 
         root.addWidget(self.modules_wrap)
 
@@ -337,8 +350,9 @@ class DashboardPage(QWidget):
         f3 = QLabel(
             "1. PDFs entram pela Validação P9.\n"
             "2. Arquivos TXT entram pelo Consolidador Fiscal.\n"
-            "3. O resultado final é salvo na pasta de destino escolhida.\n"
-            "4. O acompanhamento de progresso acontece dentro de cada módulo."
+            "3. TXTs SAP entram pelo ZTMM x Livro para conciliação.\n"
+            "4. O resultado final é salvo na pasta de destino escolhida.\n"
+            "5. O acompanhamento de progresso acontece dentro de cada módulo."
         )
         f3.setObjectName("FieldText")
         f3.setWordWrap(True)
