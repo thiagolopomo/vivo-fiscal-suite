@@ -1,7 +1,7 @@
 {
-  "version": "2.1.15",
+  "version": "2.1.16",
   "mandatory": false,
-  "notes": "Atualizações visuais do dashboard, P9 e consolidator",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.15/package.zip",
-  "sha256": "78e3b442b7add111b42dd339d45e354e04490d0d88a3a46ad80ddc18d3aa0201"
+  "notes": "Página ZTMM x Livro + layout premium + correções de responsividade + updater com elevação admin",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.16/package.zip",
+  "sha256": "582773acbceea7ce22978bfbd269298e67fd2afbd96343a14599abc0a6a71df0"
 }
