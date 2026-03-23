@@ -3,7 +3,9 @@
 
 import sys
 import time
+import shutil
 import multiprocessing
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt, QTimer
@@ -13,6 +15,48 @@ from theme import build_app_qss
 from splash import SplashScreen
 from access import TelaAcesso
 from shell import MainShell
+
+
+def limpar_caches_bases():
+    cache_dir = Path.home() / "AppData" / "Local" / "ValidadorVIVO"
+    if not cache_dir.exists():
+        return
+    # Arquivos de cache de bases processadas (NÃO remove acesso_aprovado.json)
+    arquivos_cache = [
+        "base_processada.parquet",
+        "base_processada_meta.json",
+        "base_andersen_conferencia.parquet",
+        "base_vivo_conferencia.parquet",
+        "conferencia_bases_meta.json",
+        "raicms_meta.json",
+        "ztmm_meta.json",
+        "ZTMM_Consolidado.parquet",
+    ]
+    for nome in arquivos_cache:
+        f = cache_dir / nome
+        if f.exists():
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    # Pastas de cache
+    pastas_cache = [
+        "_tmp_shards_vivo",
+        "execucoes_conferencia",
+    ]
+    for nome in pastas_cache:
+        p = cache_dir / nome
+        if p.exists() and p.is_dir():
+            try:
+                shutil.rmtree(p, ignore_errors=True)
+            except Exception:
+                pass
+    # Parquets com nome dinâmico (BASE_INTERNA__*.parquet)
+    for f in cache_dir.glob("BASE_INTERNA__*.parquet"):
+        try:
+            f.unlink()
+        except Exception:
+            pass
 
 from update_service import (
     check_for_update,
@@ -118,6 +162,9 @@ def verificar_atualizacao(shell):
 
 def main():
     log_tempo("início main")
+
+    limpar_caches_bases()
+    log_tempo("limpar_caches_bases")
 
     app = QApplication(sys.argv)
     log_tempo("QApplication criada")

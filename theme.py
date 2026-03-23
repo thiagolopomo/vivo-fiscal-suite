@@ -425,6 +425,78 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
     }}
 
     /* =========================
+       COMBOBOX / CHECKBOX
+       ========================= */
+
+    QComboBox {{
+        background: #FFFFFF;
+        border: 1px solid #DCE4EF;
+        border-radius: 10px;
+        padding: 5px 10px;
+        color: #243043;
+        font-size: 11px;
+    }}
+
+    QComboBox:hover {{
+        border: 1px solid #CDD8E6;
+    }}
+
+    QComboBox::drop-down {{
+        border: none;
+        width: 20px;
+    }}
+
+    QComboBox QAbstractItemView {{
+        background: #FFFFFF;
+        border: 1px solid #DCE4EF;
+        border-radius: 8px;
+        color: #243043;
+        selection-background-color: #F0E6FF;
+        selection-color: #3D1A78;
+        padding: 4px;
+        font-size: 11px;
+        outline: none;
+    }}
+
+    QComboBox QAbstractItemView::item {{
+        padding: 6px 10px;
+        min-height: 24px;
+    }}
+
+    QComboBox QAbstractItemView::item:hover {{
+        background: #F5EEFF;
+        color: #3D1A78;
+    }}
+
+    QCheckBox {{
+        background: transparent;
+        color: #243043;
+        font-size: 11px;
+        spacing: 6px;
+    }}
+
+    QCheckBox::indicator {{
+        width: 16px;
+        height: 16px;
+        border: 1px solid #CDD8E6;
+        border-radius: 4px;
+        background: #FFFFFF;
+    }}
+
+    QCheckBox::indicator:hover {{
+        border: 1px solid #A35AF0;
+    }}
+
+    QCheckBox::indicator:checked {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #7C18CB,
+            stop:1 #A651EA
+        );
+        border: 1px solid #6A10B0;
+    }}
+
+    /* =========================
        BOTÕES
        ========================= */
 
@@ -433,8 +505,6 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
         padding: 6px 14px;
         font-size: 12px;
         font-weight: 700;
-        min-height: 32px;
-        max-height: 16777215px;
     }}
 
     QPushButton#PrimaryButton {{
@@ -447,8 +517,8 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
         color: white;
         border: 1px solid #7A20C8;
         border-radius: 14px;
-        padding: 10px 20px;
-        font-size: 13px;
+        padding: 6px 16px;
+        font-size: 12px;
         font-weight: 700;
     }}
 
@@ -471,8 +541,8 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
         color: #552A9B;
         border: 1px solid #DCCCF8;
         border-radius: 14px;
-        padding: 10px 18px;
-        font-size: 12px;
+        padding: 6px 12px;
+        font-size: 11px;
         font-weight: 700;
     }}
 
@@ -532,9 +602,89 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
         );
     }}
 
+    QTabWidget {{
+        background: transparent;
+    }}
+
     QTabWidget::pane {{
         border: none;
         background: transparent;
+    }}
+
+    QTabWidget > QWidget {{
+        background: transparent;
+    }}
+
+    QTabBar::tab {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:0, y2:1,
+            stop:0 #F5F0FF,
+            stop:1 #EEEBF8
+        );
+        color: #6E5B98;
+        border: 1px solid #DDD4F0;
+        border-bottom: none;
+        border-top-left-radius: 12px;
+        border-top-right-radius: 12px;
+        padding: 6px 14px;
+        margin-right: 3px;
+        font-size: 11px;
+        font-weight: 650;
+    }}
+
+    QTabBar::tab:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:0, y2:1,
+            stop:0 #EDE4FF,
+            stop:1 #E4D8FB
+        );
+        color: #5A3FA0;
+        border: 1px solid #CEBEF0;
+        border-bottom: none;
+    }}
+
+    QTabBar::tab:selected {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #7C18CB,
+            stop:1 #A651EA
+        );
+        color: #FFFFFF;
+        border: 1px solid #6A10B0;
+        border-bottom: none;
+        font-weight: 700;
+    }}
+
+    QTabBar::tab:first:selected {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #1B8A6B,
+            stop:1 #2EAD8A
+        );
+        border: 1px solid #17785D;
+        border-bottom: none;
+    }}
+
+    QTabBar::tab:first:!selected {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:0, y2:1,
+            stop:0 #F0FBF7,
+            stop:1 #E6F5EF
+        );
+        color: #1B7A5E;
+        border: 1px solid #C8E6D8;
+        border-bottom: none;
+    }}
+
+    QTabBar::tab:first:!selected:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:0, y2:1,
+            stop:0 #E0F5EC,
+            stop:1 #D0ECDF
+        );
+        color: #146B50;
+        border: 1px solid #A8D8C0;
+        border-bottom: none;
     }}
 
     /* =========================
@@ -718,6 +868,46 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
     }}
 
     /* =========================
+       PAGE HERO HEADER
+       ========================= */
+
+    #PageHeroCard {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #F9F5FF,
+            stop:0.3 #F3ECFF,
+            stop:0.7 #EFF3FC,
+            stop:1 #ECF1FA
+        );
+        border: 1px solid #E2D8F3;
+        border-radius: 16px;
+    }}
+
+    #HeroIconFrame {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #7C18CB,
+            stop:1 #A651EA
+        );
+        border: none;
+        border-radius: 14px;
+    }}
+
+    #HeroIconText {{
+        color: #FFFFFF;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        background: transparent;
+    }}
+
+    #CompactPathRow {{
+        background: rgba(122, 90, 248, 0.04);
+        border: 1px solid #E8E2F4;
+        border-radius: 10px;
+    }}
+
+    /* =========================
        PÁGINAS INTERNAS PREMIUM
        ========================= */
 
@@ -811,5 +1001,153 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
     #PremiumSummaryCard[hover="true"] #MetricTitle,
     #PremiumMetricBox[hover="true"] #MetricTitle {{
         color: #717B8E;
+    }}
+
+    /* =========================
+       ZTMM ANÁLISE ACTION CARD
+       ========================= */
+
+    #AnaliseActionCard {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #FAF7FF,
+            stop:0.4 #F5EEFF,
+            stop:1 #F0F4FB
+        );
+        border: 1px solid #E2D6F5;
+        border-radius: 18px;
+    }}
+
+    #AnaliseIconFrame {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #7C18CB,
+            stop:1 #A651EA
+        );
+        border: none;
+        border-radius: 14px;
+    }}
+
+    #AnaliseIconText {{
+        color: #FFFFFF;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.6px;
+        background: transparent;
+    }}
+
+    #DivisoesCard {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #FAF7FF,
+            stop:0.4 #F5EEFF,
+            stop:1 #F0F4FB
+        );
+        border: 1px solid #E2D6F5;
+        border-radius: 18px;
+    }}
+
+    QPushButton#DivChip {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #FFFFFF,
+            stop:1 #FAF7FF
+        );
+        color: #5A4590;
+        border: 1px solid #DDD4F0;
+        border-radius: 10px;
+        padding: 3px 8px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+    }}
+
+    QPushButton#DivChip:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:1,
+            stop:0 #F1E5FF,
+            stop:1 #E9D6FF
+        );
+        border: 1px solid #C9A7F5;
+        color: #411C82;
+    }}
+
+    QPushButton#DivChip:checked {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #7C18CB,
+            stop:1 #A651EA
+        );
+        color: #FFFFFF;
+        border: 1px solid #6A10B0;
+        font-weight: 700;
+    }}
+
+    QPushButton#DivChip:checked:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #6E0FC1,
+            stop:1 #9A45E0
+        );
+        border: 1px solid #5A0CA0;
+    }}
+
+    QPushButton#DivActionBtn {{
+        background: transparent;
+        color: #7A5AF8;
+        border: 1px solid #DDD4F0;
+        border-radius: 8px;
+        padding: 4px 10px;
+        font-size: 10px;
+        font-weight: 700;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+
+    QPushButton#DivActionBtn:hover {{
+        background: #F5EEFF;
+        border: 1px solid #C9A7F5;
+        color: #5A35C0;
+    }}
+
+    QPushButton#DivExportBtn {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #7C18CB,
+            stop:1 #A651EA
+        );
+        color: #FFFFFF;
+        border: 1px solid #6A10B0;
+        border-radius: 8px;
+        padding: 4px 12px;
+        font-size: 10px;
+        font-weight: 700;
+        min-height: 22px;
+        max-height: 24px;
+    }}
+
+    QPushButton#DivExportBtn:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #6E0FC1,
+            stop:1 #9A45E0
+        );
+    }}
+
+    QPushButton#DivExportBtn:disabled {{
+        background: #EEF2F6;
+        color: #9AA5B5;
+        border: 1px solid #E7EBF1;
+    }}
+
+    #AnaliseChip {{
+        background: rgba(122, 90, 248, 0.08);
+        color: #6B45C9;
+        border: 1px solid rgba(122, 90, 248, 0.15);
+        border-radius: 8px;
+        padding: 2px 6px;
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
     }}
     """

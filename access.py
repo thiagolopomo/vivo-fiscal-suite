@@ -7,7 +7,9 @@ import getpass
 import socket
 import platform
 import uuid
+import time
 import requests
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import (
@@ -24,6 +26,32 @@ CHECK_INTERVAL_MS = 3000
 SUPABASE_URL = "https://jhkqfacpobwnirioskii.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impoa3FmYWNwb2J3bmlyaW9za2lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNzU2MDEsImV4cCI6MjA4ODg1MTYwMX0.lnRnP4ESzQc54LxX-6Y-qRZsfPEv1SGg3ozd2R0N4hY"
 SUPABASE_TABLE = "solicitacoes_acesso"
+
+CACHE_DIR = Path.home() / "AppData" / "Local" / "ValidadorVIVO"
+CACHE_ACESSO = CACHE_DIR / "acesso_aprovado.json"
+
+
+def _salvar_aprovacao(machine_id):
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "machine_id": machine_id,
+        "aprovado_em": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "usuario": getpass.getuser(),
+        "maquina": socket.gethostname(),
+    }
+    with open(CACHE_ACESSO, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _verificar_aprovacao_local(machine_id):
+    if not CACHE_ACESSO.exists():
+        return False
+    try:
+        with open(CACHE_ACESSO, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("machine_id") == machine_id
+    except Exception:
+        return False
 
 
 def _supabase_headers():
@@ -266,6 +294,14 @@ class TelaAcesso(QDialog):
         self.lbl_status.setText(texto)
 
     def verificar_status_inicial(self):
+        # Cache local: se já foi aprovado antes, pula tudo
+        if _verificar_aprovacao_local(self.machine_id):
+            self.acesso_liberado = True
+            self._set_status("Usuário já validado. Carregando app...")
+            self.btn_solicitar.setVisible(False)
+            QTimer.singleShot(400, self.accept)
+            return
+
         try:
             registro = consultar_status_acesso(self.session_id, self.machine_id)
             if not registro:
@@ -276,6 +312,7 @@ class TelaAcesso(QDialog):
 
             if status == "aprovado":
                 self.acesso_liberado = True
+                _salvar_aprovacao(self.machine_id)
                 self._set_status("Acesso aprovado. Abrindo suíte...")
                 QTimer.singleShot(500, self.accept)
                 return
@@ -324,6 +361,7 @@ class TelaAcesso(QDialog):
                 self.timer.stop()
                 self._polling = False
                 self.acesso_liberado = True
+                _salvar_aprovacao(self.machine_id)
                 self._set_status("Acesso aprovado. Abrindo suíte...")
                 QTimer.singleShot(500, self.accept)
                 return

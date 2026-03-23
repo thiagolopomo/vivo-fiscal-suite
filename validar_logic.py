@@ -23,6 +23,10 @@ TMP_NOME = "_tmp_shards_vivo"
 CACHE_DIR = Path.home() / "AppData" / "Local" / "ValidadorVIVO"
 CACHE_PARQUET = CACHE_DIR / "base_processada.parquet"
 CACHE_META = CACHE_DIR / "base_processada_meta.json"
+CACHE_ANDERSEN_PARQUET = CACHE_DIR / "base_andersen_conferencia.parquet"
+CACHE_VIVO_PARQUET = CACHE_DIR / "base_vivo_conferencia.parquet"
+CACHE_CONFERENCIA_META = CACHE_DIR / "conferencia_bases_meta.json"
+CACHE_EXECUCOES_DIR = CACHE_DIR / "execucoes_conferencia"
 
 LOGO_VIVO_ARQ = "logo_vivo.png"
 
@@ -46,6 +50,27 @@ def caminho_recurso(nome_arquivo):
 # =========================
 # FUNÇÕES DO SCRIPT
 # =========================
+
+def descobrir_periodos_parquet(parquet_path):
+    try:
+        dfp = (
+            pl.scan_parquet(str(parquet_path))
+            .select(pl.col("Período").cast(pl.Utf8).fill_null("").alias("Período"))
+            .unique()
+            .collect()
+        )
+        vals = [x for x in dfp["Período"].to_list() if str(x).strip()]
+        vals = sorted(set(vals))
+        return vals
+    except Exception:
+        return []
+
+def resumir_diretorio(path_str, max_len=40):
+    s = str(path_str or "")
+    if len(s) <= max_len:
+        return s
+    return s[:max_len-3] + "..."
+
 def csv_para_xlsb_via_excel(csv_path, xlsb_path, sheet_name="Plan1", progress_callback=None, progresso_base=0, progresso_total=100):
     import win32com.client as win32
 
@@ -574,6 +599,398 @@ def carregar_meta_cache():
     with open(CACHE_META, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def expr_numero_br(col_name):
+    s = pl.col(col_name).cast(pl.Utf8).fill_null("").str.strip_chars()
+
+    # trata negativo no final: 123,45-
+    s = (
+        pl.when(s.str.ends_with("-"))
+        .then(pl.lit("-") + s.str.slice(0, s.str.len_chars() - 1))
+        .otherwise(s)
+    )
+
+    # remove separador de milhar e troca vírgula por ponto
+    s = (
+        s.str.replace_all(r"\.", "")
+         .str.replace(",", ".", literal=True)
+    )
+
+    return s.cast(pl.Float64, strict=False).fill_null(0.0)
+
+def montar_base_vivo_conferencia_filtrada(lf, tipo_movimento):
+    cols = lf.collect_schema().names()
+    tipo = (tipo_movimento or "").upper()
+
+    def norm_upper(c):
+        return (
+            pl.col(c)
+            .cast(pl.Utf8)
+            .fill_null("")
+            .str.strip_chars()
+            .str.to_uppercase()
+        )
+
+    def norm_txt(c):
+        return (
+            pl.col(c)
+            .cast(pl.Utf8)
+            .fill_null("")
+            .str.strip_chars()
+        )
+
+    exprs_base = []
+
+    if "Divisão" in cols:
+        exprs_base.append(
+            pl.col("Divisão").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("Divisão")
+        )
+    else:
+        exprs_base.append(pl.lit("").alias("Divisão"))
+
+    if "CFOP_COD" in cols:
+        exprs_base.append(
+            pl.col("CFOP_COD").cast(pl.Utf8).fill_null("").str.strip_chars().alias("CFOP")
+        )
+    else:
+        exprs_base.append(pl.lit("").alias("CFOP"))
+
+    if "Mapeamento" in cols:
+        exprs_base.append(
+            pl.col("Mapeamento").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Mapeamento")
+        )
+    else:
+        exprs_base.append(pl.lit("").alias("Mapeamento"))
+
+    if "Período" in cols:
+        exprs_base.append(pl.col("Período").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Período"))
+    else:
+        exprs_base.append(pl.lit("").alias("Período"))
+
+    if "Nome do Arquivo" in cols:
+        exprs_base.append(pl.col("Nome do Arquivo").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Nome do Arquivo"))
+    else:
+        exprs_base.append(pl.lit("").alias("Nome do Arquivo"))
+
+    if tipo == "ENTRADA":
+        excluir_cfop = ["1923", "2923", "1915", "2915", "1154", "2154", "1403", "2403", "1555", "2555"]
+        col_trib = "TRIBICMS" if "TRIBICMS" in cols else ("TRIBICM" if "TRIBICM" in cols else None)
+
+        exprs_norm = []
+        if "CFOP_COD" in cols:
+            exprs_norm.append(norm_upper("CFOP_COD").alias("CFOP_COD"))
+        if "IND_CANC" in cols:
+            exprs_norm.append(norm_upper("IND_CANC").alias("IND_CANC"))
+        if col_trib:
+            exprs_norm.append(norm_upper(col_trib).alias(col_trib))
+        if "Mapeamento" in cols:
+            exprs_norm.append(norm_txt("Mapeamento").alias("Mapeamento"))
+        if "Divisão" in cols:
+            exprs_norm.append(
+                pl.col("Divisão").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("Divisão")
+            )
+
+        lf2 = lf.with_columns(exprs_norm)
+
+        filtros = []
+        if col_trib:
+            filtros.append(pl.col(col_trib) == "S")
+        if "IND_CANC" in cols:
+            filtros.append(pl.col("IND_CANC") == "N")
+        if "CFOP_COD" in cols:
+            filtros.append(~pl.col("CFOP_COD").is_in(excluir_cfop))
+
+        if filtros:
+            expr = filtros[0]
+            for f in filtros[1:]:
+                expr = expr & f
+            lf2 = lf2.filter(expr)
+
+        valor_expr = expr_numero_br("VAL_ICMS") if "VAL_ICMS" in cols else pl.lit(0.0)
+
+        return (
+            lf2.with_columns(exprs_base + [
+                pl.lit("Vivo").alias("Base"),
+                pl.lit("Vivo").alias("Fonte"),
+                pl.lit("Entrada").alias("Tipo"),
+                valor_expr.alias("Valor_ICMS_Conf"),
+            ])
+            .select([
+                "Base",
+                "Fonte",
+                "Período",
+                "Nome do Arquivo",
+                "Divisão",
+                "CFOP",
+                "Mapeamento",
+                "Tipo",
+                "Valor_ICMS_Conf",
+            ])
+        )
+
+    elif tipo == "SAIDA":
+        exprs_norm = []
+        if "CFOP_COD" in cols:
+            exprs_norm.append(norm_upper("CFOP_COD").alias("CFOP_COD"))
+        if "IND_CANC" in cols:
+            exprs_norm.append(norm_upper("IND_CANC").alias("IND_CANC"))
+        if "I_2" in cols:
+            exprs_norm.append(norm_upper("I_2").alias("I_2"))
+        if "Mapeamento" in cols:
+            exprs_norm.append(norm_txt("Mapeamento").alias("Mapeamento"))
+        if "Divisão" in cols:
+            exprs_norm.append(
+                pl.col("Divisão").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("Divisão")
+            )
+
+        lf2 = lf.with_columns(exprs_norm)
+
+        filtros = []
+        if "I_2" in cols:
+            filtros.append(pl.col("I_2") == "S")
+        if "IND_CANC" in cols:
+            filtros.append(pl.col("IND_CANC") == "N")
+
+        if filtros:
+            expr = filtros[0]
+            for f in filtros[1:]:
+                expr = expr & f
+            lf2 = lf2.filter(expr)
+
+        valor_expr = (
+            expr_numero_br("INFSM_VAL_ICMS")
+            if "INFSM_VAL_ICMS" in cols else
+            expr_numero_br("VAL_ICMS")
+            if "VAL_ICMS" in cols else
+            pl.lit(0.0)
+        )
+
+        return (
+            lf2.with_columns(exprs_base + [
+                pl.lit("Vivo").alias("Base"),
+                pl.lit("Vivo").alias("Fonte"),
+                pl.lit("Saída").alias("Tipo"),
+                valor_expr.alias("Valor_ICMS_Conf"),
+            ])
+            .select([
+                "Base",
+                "Fonte",
+                "Período",
+                "Nome do Arquivo",
+                "Divisão",
+                "CFOP",
+                "Mapeamento",
+                "Tipo",
+                "Valor_ICMS_Conf",
+            ])
+        )
+
+    else:
+        raise ValueError(f"Tipo de movimento inválido para conferência: {tipo_movimento}")
+
+
+def gerar_bases_conferencia_cache(parquet_path, tipo_movimento, base_dir):
+    CACHE_EXECUCOES_DIR.mkdir(parents=True, exist_ok=True)
+
+    parquet_path = str(parquet_path)
+    tipo = (tipo_movimento or "").upper()
+
+    periodos = descobrir_periodos_parquet(parquet_path)
+    if len(periodos) == 1:
+        periodo_txt = periodos[0]
+    elif len(periodos) > 1:
+        periodo_txt = f"MULTI_{len(periodos)}_PERIODOS"
+    else:
+        periodo_txt = "SEM_PERIODO"
+
+    exec_id = time.strftime("%Y%m%d_%H%M%S")
+    exec_dir = CACHE_EXECUCOES_DIR / f"{exec_id}_{tipo}"
+    exec_dir.mkdir(parents=True, exist_ok=True)
+
+    nome_copia = f"BASE_INTERNA__{periodo_txt}__{tipo}.parquet"
+    copia_nomeada = exec_dir / nome_copia
+
+    (
+        pl.scan_parquet(parquet_path)
+        .sink_parquet(str(copia_nomeada), compression=COMPRESSION)
+    )
+
+    cache_andersen = exec_dir / "base_andersen_conferencia.parquet"
+    cache_vivo = exec_dir / "base_vivo_conferencia.parquet"
+    cache_meta = exec_dir / "meta.json"
+
+    lf = pl.scan_parquet(parquet_path)
+    cols = lf.collect_schema().names()
+
+    # =========================
+    # BASE ANDERSEN CONFERÊNCIA
+    # =========================
+    cols_andersen = [c for c in [
+        "Fonte", "Período", "Nome do Arquivo", "Divisão", "CFOP_COD", "Mapeamento",
+        "VAL_ICMS", "INFSM_VAL_ICMS", "IND_CANC", "TRIBICM", "TRIBICMS", "I_2"
+    ] if c in cols]
+
+    if cols_andersen:
+        lf_and = lf.select(cols_andersen)
+
+        if tipo == "ENTRADA":
+            col_trib = "TRIBICMS" if "TRIBICMS" in cols else ("TRIBICM" if "TRIBICM" in cols else None)
+            excluir_cfop = ["1923", "2923", "1915", "2915", "1154", "2154", "1403", "2403", "1555", "2555"]
+
+            exprs_norm = []
+            if "CFOP_COD" in cols:
+                exprs_norm.append(
+                    pl.col("CFOP_COD").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("CFOP_COD")
+                )
+            if "IND_CANC" in cols:
+                exprs_norm.append(
+                    pl.col("IND_CANC").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("IND_CANC")
+                )
+            if col_trib:
+                exprs_norm.append(
+                    pl.col(col_trib).cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias(col_trib)
+                )
+
+            lf_and = lf_and.with_columns(exprs_norm)
+
+            filtros = []
+            if col_trib:
+                filtros.append(pl.col(col_trib) == "S")
+            if "IND_CANC" in cols:
+                filtros.append(pl.col("IND_CANC") == "N")
+            if "CFOP_COD" in cols:
+                filtros.append(~pl.col("CFOP_COD").is_in(excluir_cfop))
+
+            if filtros:
+                expr = filtros[0]
+                for f in filtros[1:]:
+                    expr = expr & f
+                lf_and = lf_and.filter(expr)
+
+            valor_expr_and = expr_numero_br("VAL_ICMS") if "VAL_ICMS" in cols else pl.lit(0.0)
+
+            (
+                lf_and.with_columns([
+                    pl.lit("Andersen").alias("Base"),
+                    pl.lit("Andersen").alias("Fonte"),
+                    pl.col("Período").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Período")
+                        if "Período" in cols else pl.lit("").alias("Período"),
+                    pl.col("Nome do Arquivo").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Nome do Arquivo")
+                        if "Nome do Arquivo" in cols else pl.lit("").alias("Nome do Arquivo"),
+                    pl.col("Divisão").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("Divisão")
+                        if "Divisão" in cols else pl.lit("").alias("Divisão"),
+                    pl.col("CFOP_COD").cast(pl.Utf8).fill_null("").str.strip_chars().alias("CFOP")
+                        if "CFOP_COD" in cols else pl.lit("").alias("CFOP"),
+                    pl.col("Mapeamento").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Mapeamento")
+                        if "Mapeamento" in cols else pl.lit("").alias("Mapeamento"),
+                    pl.lit("Entrada").alias("Tipo"),
+                    valor_expr_and.alias("Valor_ICMS_Conf"),
+                ])
+                .select([
+                    "Base",
+                    "Fonte",
+                    "Período",
+                    "Nome do Arquivo",
+                    "Divisão",
+                    "CFOP",
+                    "Mapeamento",
+                    "Tipo",
+                    "Valor_ICMS_Conf",
+                ])
+                .sink_parquet(str(cache_andersen), compression=COMPRESSION)
+            )
+
+        elif tipo == "SAIDA":
+            exprs_norm = []
+            if "CFOP_COD" in cols:
+                exprs_norm.append(
+                    pl.col("CFOP_COD").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("CFOP_COD")
+                )
+            if "IND_CANC" in cols:
+                exprs_norm.append(
+                    pl.col("IND_CANC").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("IND_CANC")
+                )
+            if "I_2" in cols:
+                exprs_norm.append(
+                    pl.col("I_2").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("I_2")
+                )
+
+            lf_and = lf_and.with_columns(exprs_norm)
+
+            filtros = []
+            if "I_2" in cols:
+                filtros.append(pl.col("I_2") == "S")
+            if "IND_CANC" in cols:
+                filtros.append(pl.col("IND_CANC") == "N")
+
+            if filtros:
+                expr = filtros[0]
+                for f in filtros[1:]:
+                    expr = expr & f
+                lf_and = lf_and.filter(expr)
+
+            valor_expr_and = (
+                expr_numero_br("INFSM_VAL_ICMS")
+                if "INFSM_VAL_ICMS" in cols else
+                expr_numero_br("VAL_ICMS")
+                if "VAL_ICMS" in cols else
+                pl.lit(0.0)
+            )
+
+            (
+                lf_and.with_columns([
+                    pl.lit("Andersen").alias("Base"),
+                    pl.lit("Andersen").alias("Fonte"),
+                    pl.col("Período").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Período")
+                        if "Período" in cols else pl.lit("").alias("Período"),
+                    pl.col("Nome do Arquivo").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Nome do Arquivo")
+                        if "Nome do Arquivo" in cols else pl.lit("").alias("Nome do Arquivo"),
+                    pl.col("Divisão").cast(pl.Utf8).fill_null("").str.strip_chars().str.to_uppercase().alias("Divisão")
+                        if "Divisão" in cols else pl.lit("").alias("Divisão"),
+                    pl.col("CFOP_COD").cast(pl.Utf8).fill_null("").str.strip_chars().alias("CFOP")
+                        if "CFOP_COD" in cols else pl.lit("").alias("CFOP"),
+                    pl.col("Mapeamento").cast(pl.Utf8).fill_null("").str.strip_chars().alias("Mapeamento")
+                        if "Mapeamento" in cols else pl.lit("").alias("Mapeamento"),
+                    pl.lit("Saída").alias("Tipo"),
+                    valor_expr_and.alias("Valor_ICMS_Conf"),
+                ])
+                .select([
+                    "Base",
+                    "Fonte",
+                    "Período",
+                    "Nome do Arquivo",
+                    "Divisão",
+                    "CFOP",
+                    "Mapeamento",
+                    "Tipo",
+                    "Valor_ICMS_Conf",
+                ])
+                .sink_parquet(str(cache_andersen), compression=COMPRESSION)
+            )
+
+    # =========================
+    # BASE VIVO CONFERÊNCIA
+    # =========================
+    base_vivo_conf = montar_base_vivo_conferencia_filtrada(lf, tipo)
+    base_vivo_conf.sink_parquet(str(cache_vivo), compression=COMPRESSION)
+
+    meta = {
+        "exec_id": exec_id,
+        "periodo": periodo_txt,
+        "tipo_movimento": tipo,
+        "base_dir": str(base_dir),
+        "base_dir_resumido": resumir_diretorio(base_dir),
+        "data_execucao": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "andersen": str(cache_andersen),
+        "vivo": str(cache_vivo),
+        "base_processada": str(copia_nomeada),
+        "label": f"{periodo_txt} - {'Entrada' if tipo == 'ENTRADA' else 'Saída'} | {resumir_diretorio(base_dir)}"
+    }
+
+    with open(cache_meta, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    with open(CACHE_CONFERENCIA_META, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
 
 def selecionar_colunas_existentes(df, colunas_desejadas):
     cols_existentes = df.columns
@@ -1110,21 +1527,40 @@ def processar_arquivo(args):
         expr_periodo = pl.lit("").alias("Período")
 
     df = df.with_columns([
-        pl.lit("Fiscal").alias("Fonte"),
+        pl.lit("Vivo").alias("Fonte"),
         pl.lit(nome_arquivo).alias("Nome do Arquivo"),
         pl.lit(divisao_arquivo).alias("DivArquivo"),
         expr_periodo,
+        pl.col("FILIAL").cast(pl.Utf8).str.strip_chars().alias("FILIAL"),
+        pl.col("CFOP_COD").cast(pl.Utf8).str.strip_chars().alias("CFOP_COD"),
     ])
 
     df = df.join(
-        div_df,
+        div_df.with_columns(
+            pl.col("Local de Negócios").cast(pl.Utf8).str.strip_chars().alias("Local de Negócios")
+        ),
         left_on="FILIAL",
         right_on="Local de Negócios",
         how="left"
     )
 
+    df = df.join(
+        cfop_df,
+        left_on="CFOP_COD",
+        right_on="CFOP",
+        how="left"
+    )
+
+    # garantir coluna Mapeamento
+    if "Mapeamento" not in df.columns:
+        df = df.with_columns(pl.lit("").alias("Mapeamento"))
+    else:
+        df = df.with_columns(
+            pl.col("Mapeamento").fill_null("").alias("Mapeamento")
+        )
+
     df = df.with_columns([
-        pl.when(pl.col("FILIAL").cast(pl.Utf8).str.strip_chars() == "3007")
+        pl.when(pl.col("FILIAL") == "3007")
         .then(pl.lit("31SC"))
         .when(pl.col("DivArquivo").str.to_uppercase() == "85MN")
         .then(pl.lit("85MG"))
@@ -1135,18 +1571,6 @@ def processar_arquivo(args):
         .otherwise(pl.col("DivArquivo"))
         .alias("Divisão")
     ])
-
-
-    df = df.with_columns(
-        pl.col("CFOP_COD").cast(pl.Utf8).str.strip_chars().alias("CFOP_COD")
-    )
-
-    df = df.join(
-        cfop_df,
-        left_on="CFOP_COD",
-        right_on="CFOP",
-        how="left"
-    )
 
     df = df.with_columns([
         pl.col(c).str.strip_chars().alias(c)
@@ -1178,7 +1602,6 @@ def consolidar_final(base_dir_str, progress_callback=None):
 
     base_dir = Path(base_dir_str)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    parquet_final = CACHE_PARQUET
     tmp_dir = CACHE_DIR / TMP_NOME
 
     arquivos = sorted(base_dir.rglob("*.txt"))
@@ -1231,11 +1654,23 @@ def consolidar_final(base_dir_str, progress_callback=None):
     ordem_final = ["Índice"] + cols
     df = df.select(ordem_final)
 
-    df.write_parquet(
-        parquet_final,
-        compression=COMPRESSION,
-        row_group_size=ROW_GROUP
-    )
+    periodos = sorted(set(
+        str(x).strip() for x in df["Período"].to_list()
+        if str(x).strip()
+    ))
+
+    if len(periodos) == 1:
+        periodo_txt = periodos[0]
+    elif len(periodos) > 1:
+        periodo_txt = f"MULTI_{len(periodos)}_PERIODOS"
+    else:
+        periodo_txt = "SEM_PERIODO"
+
+    parquet_final = CACHE_DIR / f"BASE_INTERNA__{periodo_txt}__{tipo_movimento}.parquet"
+
+    df.write_parquet(parquet_final, compression=COMPRESSION, row_group_size=ROW_GROUP)
+
+    gerar_bases_conferencia_cache(parquet_final, tipo_movimento, base_dir)
 
     if progress_callback:
         progress_callback("finalizado", 1, 1, parquet_final.name)

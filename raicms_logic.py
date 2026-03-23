@@ -6,6 +6,8 @@ import re
 import sys
 import time
 import unicodedata
+import json
+from pathlib import Path
 
 import pdfplumber
 import pandas as pd
@@ -18,9 +20,12 @@ from openpyxl.styles import NamedStyle
 # CONFIG GERAL
 # =========================================================
 ARQ_DIVISAO = "Tabela_Divisao.csv"
+ARQ_CFOP_MAP = "Mapeamento_CFOP.csv"
 
 TITULO_ALVO = "LIVRO REGISTRO DE APURAÇÃO DO ICMS - RAICMS - MODELO P"
 TITULO_RESUMO = "RESUMO DA APURAÇÃO DO IMPOSTO".upper()
+CACHE_DIR = Path.home() / "AppData" / "Local" / "ValidadorVIVO"
+CACHE_RAICMS_META = CACHE_DIR / "raicms_meta.json"
 
 
 # =========================================================
@@ -67,6 +72,18 @@ def formatar_periodo(periodo):
         return ""
     return str(periodo).replace("/", ".")
 
+def ler_txt_com_fallback(caminho_txt):
+    encodings = ["utf-8-sig", "utf-8", "latin1"]
+
+    for enc in encodings:
+        try:
+            with open(caminho_txt, "r", encoding=enc, errors="strict") as f:
+                return f.read()
+        except Exception:
+            continue
+
+    with open(caminho_txt, "r", encoding="latin1", errors="ignore") as f:
+        return f.read()
 
 def extrair_cabecalho_pagina(texto):
     firma = ""
@@ -109,24 +126,125 @@ def extrair_cabecalho_pagina(texto):
     }
 
 
-def extrair_filial_do_arquivo(nome_arquivo):
-    nome = os.path.splitext(os.path.basename(nome_arquivo))[0]
+def extrair_filial_do_arquivo(caminho_pdf):
+    nome = os.path.splitext(os.path.basename(caminho_pdf))[0]
     nome_up = nome.upper()
 
     if "PAY" in nome_up:
         return "PAY"
 
-    m = re.search(r"FL\s*(\d{4})", nome_up)
+    # PRIORIDADE MÁXIMA: FL3164 / FL 3164 / FL-3164 / FL_3164
+    m = re.search(r"\bFL[\s_\-]*(\d{4})\b", nome_up)
     if m:
         return m.group(1)
 
-    tokens = re.split(r"[_\-\s]+", nome_up)
-    for tok in tokens:
-        if re.fullmatch(r"\d{4}", tok):
-            return tok
+    # Se não achou FL, tenta outros blocos de 4 dígitos no nome do PDF,
+    # mas ignorando os que forem claramente período (MMYY ou YYYY)
+    candidatos_pdf = re.findall(r"(?<!\d)(\d{4})(?!\d)", nome_up)
+
+    candidatos_pdf_filtrados = []
+    for c in candidatos_pdf:
+        if re.fullmatch(r"20\d{2}", c):
+            continue
+
+        mes = int(c[:2])
+        ano2 = c[2:]
+        if 1 <= mes <= 12 and re.fullmatch(r"\d{2}", ano2):
+            continue
+
+        candidatos_pdf_filtrados.append(c)
+
+    if candidatos_pdf_filtrados:
+        return candidatos_pdf_filtrados[0]
 
     return ""
 
+def encontrar_filial_por_txt(caminho_pdf, cnpj, ie):
+    pasta = os.path.dirname(caminho_pdf)
+
+    try:
+        txts = [f for f in os.listdir(pasta) if f.lower().endswith(".txt")]
+    except Exception:
+        return ""
+
+    candidatos = []
+
+    cnpj_norm = re.sub(r"\D", "", cnpj or "")
+    ie_norm = re.sub(r"\D", "", ie or "")
+
+    for txt in txts:
+        caminho_txt = os.path.join(pasta, txt)
+
+        try:
+            conteudo = ler_txt_com_fallback(caminho_txt)
+        except Exception:
+            continue
+
+        conteudo_cnpj_ie = conteudo
+        conteudo_cnpj_ie_norm = re.sub(r"\D", "", conteudo_cnpj_ie)
+
+        if cnpj_norm and cnpj_norm not in conteudo_cnpj_ie_norm:
+            continue
+
+        if ie_norm and ie_norm not in conteudo_cnpj_ie_norm:
+            continue
+
+        nome_txt = os.path.splitext(os.path.basename(txt))[0].upper()
+
+        m = re.search(r"\bFL[\s_\-]*(\d{4})\b", nome_txt)
+        if m:
+            candidatos.append(m.group(1))
+            continue
+
+        nums = re.findall(r"(?<!\d)(\d{4})(?!\d)", nome_txt)
+
+        candidatos_filtrados = []
+        for n in nums:
+            if re.fullmatch(r"20\d{2}", n):
+                continue
+
+            mes = int(n[:2])
+            ano2 = n[2:]
+            if 1 <= mes <= 12 and re.fullmatch(r"\d{2}", ano2):
+                continue
+
+            candidatos_filtrados.append(n)
+
+        if candidatos_filtrados:
+            candidatos.append(candidatos_filtrados[0])
+
+    candidatos = list(dict.fromkeys(candidatos))
+
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    return ""
+
+def encontrar_filial_priorizando_txts_da_pasta(caminho_arquivo, cnpj="", ie=""):
+    pasta = os.path.dirname(caminho_arquivo)
+
+    try:
+        txts = sorted(
+            os.path.join(pasta, f)
+            for f in os.listdir(pasta)
+            if f.lower().endswith(".txt")
+        )
+    except Exception:
+        txts = []
+
+    # 1) Prioridade máxima: tentar extrair filial diretamente do nome dos TXTs da pasta
+    for caminho_txt in txts:
+        filial_txt = extrair_filial_do_arquivo(caminho_txt)
+        if filial_txt:
+            return filial_txt
+
+    # 2) Se não achou pelo nome, tenta pelo conteúdo/CNPJ/IE
+    if txts:
+        filial_por_txt = encontrar_filial_por_txt(caminho_arquivo, cnpj, ie)
+        if filial_por_txt:
+            return filial_por_txt
+
+    return ""
 
 def carregar_mapa_divisao():
     arq = caminho_recurso(ARQ_DIVISAO)
@@ -164,13 +282,96 @@ def carregar_mapa_divisao():
         )
 
     mapa = {}
+
     for _, row in df[[col_filial, col_divisao]].dropna(how="all").iterrows():
         filial = normalizar_espacos(str(row[col_filial])) if pd.notna(row[col_filial]) else ""
         divisao = normalizar_espacos(str(row[col_divisao])) if pd.notna(row[col_divisao]) else ""
 
         filial_limpa = re.sub(r"\.0$", "", filial.strip())
-        if filial_limpa:
-            mapa[filial_limpa.upper()] = divisao
+        if not filial_limpa or not divisao:
+            continue
+
+        chaves = {filial_limpa.upper()}
+
+        if re.fullmatch(r"\d+", filial_limpa):
+            chaves.add(filial_limpa.zfill(4))
+
+        for chave in chaves:
+            mapa.setdefault(chave, [])
+            if divisao not in mapa[chave]:
+                mapa[chave].append(divisao)
+
+    return mapa
+
+def resolver_divisao_por_filial_e_pasta(caminho_arquivo, filial, mapa_divisao):
+    filial_norm = (filial or "").strip().upper()
+
+    if not filial_norm:
+        return ""
+
+    if filial_norm == "PAY":
+        return "PAY"
+
+    divisoes = mapa_divisao.get(filial_norm, [])
+
+    def normalizar_divisao_final(div):
+        div = (div or "").strip().upper()
+        if div == "85MN":
+            return "85MG"
+        return div
+
+    if not divisoes:
+        pasta_nome = os.path.basename(os.path.dirname(caminho_arquivo)).strip().upper()
+        return normalizar_divisao_final(pasta_nome)
+
+    if len(divisoes) == 1:
+        return normalizar_divisao_final(divisoes[0])
+
+    pasta_nome = os.path.basename(os.path.dirname(caminho_arquivo)).strip().upper()
+    pasta_nome = normalizar_divisao_final(pasta_nome)
+
+    for divisao in divisoes:
+        if normalizar_divisao_final(divisao) == pasta_nome:
+            return normalizar_divisao_final(divisao)
+
+    return normalizar_divisao_final(divisoes[0])
+
+def carregar_mapa_cfop():
+    arq = caminho_recurso(ARQ_CFOP_MAP)
+
+    tentativas = [
+        {"sep": ";", "encoding": "utf-8-sig"},
+        {"sep": ",", "encoding": "utf-8-sig"},
+        {"sep": ";", "encoding": "latin1"},
+        {"sep": ",", "encoding": "latin1"},
+    ]
+
+    ultimo_erro = None
+    df = None
+
+    for cfg in tentativas:
+        try:
+            df = pd.read_csv(arq, **cfg)
+            break
+        except Exception as e:
+            ultimo_erro = e
+
+    if df is None:
+        raise RuntimeError(f"Erro ao ler Mapeamento_CFOP.csv: {ultimo_erro}")
+
+    cols_norm = {normalizar_texto(c): c for c in df.columns}
+    col_cfop = cols_norm.get(normalizar_texto("CFOP"))
+    col_map = cols_norm.get(normalizar_texto("Mapeamento"))
+
+    if not col_cfop or not col_map:
+        raise RuntimeError("Não encontrei as colunas 'CFOP' e/ou 'Mapeamento' no Mapeamento_CFOP.csv")
+
+    mapa = {}
+    for _, row in df[[col_cfop, col_map]].dropna(how="all").iterrows():
+        cfop = normalizar_espacos(str(row[col_cfop])) if pd.notna(row[col_cfop]) else ""
+        mapeamento = normalizar_espacos(str(row[col_map])) if pd.notna(row[col_map]) else ""
+        if cfop:
+            mapa[str(cfop).strip()] = mapeamento
 
     return mapa
 
@@ -280,11 +481,10 @@ def deve_ignorar_linha_cfop(linha):
     return any(x in l for x in ignorar_se_conter)
 
 
-def processar_pdf_cfop(caminho_pdf, mapa_divisao):
+def processar_pdf_cfop(caminho_pdf, mapa_divisao, mapa_cfop):
     registros = []
     arquivo_pdf = os.path.basename(caminho_pdf)
-    filial = extrair_filial_do_arquivo(arquivo_pdf)
-    divisao = mapa_divisao.get((filial or "").upper(), "")
+    filial = extrair_filial_do_arquivo(caminho_pdf)
 
     with pdfplumber.open(caminho_pdf) as pdf:
         for num_pagina, pagina in enumerate(pdf.pages, start=1):
@@ -297,6 +497,15 @@ def processar_pdf_cfop(caminho_pdf, mapa_divisao):
                 continue
 
             meta = extrair_cabecalho_pagina(texto)
+
+            if not filial:
+                filial = encontrar_filial_priorizando_txts_da_pasta(
+                    caminho_pdf,
+                    meta["CNPJ"],
+                    meta["IE"]
+                )
+
+            divisao = resolver_divisao_por_filial_e_pasta(caminho_pdf, filial, mapa_divisao)
 
             linhas = texto.splitlines()
             tipo_atual = None
@@ -333,9 +542,9 @@ def processar_pdf_cfop(caminho_pdf, mapa_divisao):
                             "Período": meta["Período"],
                             "Tipo": tipo_atual,
                             "Status": "Entrada / Saída",
+                            "Mapeamento": mapa_cfop.get(str(dados_linha["CFOP"]).strip(), ""),
                             **dados_linha
                         })
-
     return registros
 
 
@@ -467,8 +676,7 @@ def definir_tipo_resumo(secao, descricao):
 def processar_pdf_resumo(caminho_pdf, mapa_divisao):
     registros = []
     arquivo_pdf = os.path.basename(caminho_pdf)
-    filial = extrair_filial_do_arquivo(arquivo_pdf)
-    divisao = mapa_divisao.get((filial or "").upper(), "")
+    filial = extrair_filial_do_arquivo(caminho_pdf)
 
     with pdfplumber.open(caminho_pdf) as pdf:
         seq = 0
@@ -483,6 +691,15 @@ def processar_pdf_resumo(caminho_pdf, mapa_divisao):
                 continue
 
             meta = extrair_cabecalho_pagina(texto)
+
+            if not filial:
+                filial = encontrar_filial_priorizando_txts_da_pasta(
+                    caminho_pdf,
+                    meta["CNPJ"],
+                    meta["IE"]
+                )
+
+            divisao = resolver_divisao_por_filial_e_pasta(caminho_pdf, filial, mapa_divisao)
 
             linhas = texto.splitlines()
             secao_atual = None
@@ -527,6 +744,172 @@ def processar_pdf_resumo(caminho_pdf, mapa_divisao):
     return registros
 
 
+def processar_txt_cfop(caminho_txt, mapa_divisao, mapa_cfop):
+    registros = []
+    arquivo_txt = os.path.basename(caminho_txt)
+    filial = extrair_filial_do_arquivo(caminho_txt)
+
+    try:
+        texto_total = ler_txt_com_fallback(caminho_txt)
+    except Exception:
+        return registros
+
+    paginas = re.split(
+        r"(?=LIVRO REGISTRO DE APURAÇÃO DO ICMS - RAICMS - MODELO P9|LIVRO REGISTRO DE APURAÇÃO DO ICMS - RAICMS - MODELO P)",
+        texto_total
+    )
+
+    num_pagina_real = 0
+
+    for bloco in paginas:
+        texto = bloco.strip()
+        if not texto:
+            continue
+
+        if "LIVRO REGISTRO DE APURAÇÃO DO ICMS" not in texto.upper():
+            continue
+
+        num_pagina_real += 1
+
+        if TITULO_RESUMO in texto.upper():
+            continue
+
+        meta = extrair_cabecalho_pagina(texto)
+
+        if not filial:
+            filial = encontrar_filial_por_txt(
+                caminho_txt,
+                meta["CNPJ"],
+                meta["IE"]
+            )
+
+        divisao = resolver_divisao_por_filial_e_pasta(caminho_txt, filial, mapa_divisao)
+
+        linhas = texto.splitlines()
+        tipo_atual = None
+
+        for linha in linhas:
+            linha_limpa = linha.strip()
+
+            if not linha_limpa:
+                continue
+
+            novo_tipo = linha_indica_secao_cfop(linha_limpa)
+            if novo_tipo:
+                tipo_atual = novo_tipo
+                continue
+
+            if deve_ignorar_linha_cfop(linha_limpa):
+                continue
+
+            if eh_linha_numerica_tabela(linha_limpa):
+                dados_linha = parse_linha_tabela(linha_limpa)
+                if dados_linha:
+                    dados_linha["Imposto Creditado"] = aplicar_sinal_entrada(
+                        dados_linha["Imposto Creditado"], tipo_atual
+                    )
+
+                    registros.append({
+                        "Arquivo PDF": arquivo_txt,
+                        "Filial": filial,
+                        "Divisão": divisao,
+                        "Página": num_pagina_real,
+                        "Firma": meta["Firma"],
+                        "IE": meta["IE"],
+                        "CNPJ": meta["CNPJ"],
+                        "Período": meta["Período"],
+                        "Tipo": tipo_atual,
+                        "Status": "Entrada / Saída",
+                        "Mapeamento": mapa_cfop.get(str(dados_linha["CFOP"]).strip(), ""),
+                        **dados_linha
+                    })
+
+    return registros
+
+def processar_txt_resumo(caminho_txt, mapa_divisao):
+    registros = []
+    arquivo_txt = os.path.basename(caminho_txt)
+    filial = extrair_filial_do_arquivo(caminho_txt)
+
+    try:
+        texto_total = ler_txt_com_fallback(caminho_txt)
+    except Exception:
+        return registros
+
+    paginas = re.split(
+        r"(?=LIVRO REGISTRO DE APURAÇÃO DO ICMS - RAICMS - MODELO P9|LIVRO REGISTRO DE APURAÇÃO DO ICMS - RAICMS - MODELO P)",
+        texto_total
+    )
+
+    seq = 0
+    num_pagina_real = 0
+
+    for bloco in paginas:
+        texto = bloco.strip()
+        if not texto:
+            continue
+
+        if "LIVRO REGISTRO DE APURAÇÃO DO ICMS" not in texto.upper():
+            continue
+
+        num_pagina_real += 1
+
+        if TITULO_RESUMO not in texto.upper():
+            continue
+
+        meta = extrair_cabecalho_pagina(texto)
+
+        if not filial:
+            filial = encontrar_filial_por_txt(
+                caminho_txt,
+                meta["CNPJ"],
+                meta["IE"]
+            )
+
+        divisao = resolver_divisao_por_filial_e_pasta(caminho_txt, filial, mapa_divisao)
+
+        linhas = texto.splitlines()
+        secao_atual = None
+
+        for linha in linhas:
+            linha_limpa = linha.strip()
+
+            if not linha_limpa:
+                continue
+
+            nova_secao = linha_indica_secao_resumo(linha_limpa)
+            if nova_secao:
+                secao_atual = nova_secao
+                continue
+
+            if deve_ignorar_linha_resumo(linha_limpa):
+                continue
+
+            dados = parse_linha_resumo(linha_limpa)
+            if dados:
+                seq += 1
+                tipo = definir_tipo_resumo(secao_atual, dados["Descrição"])
+                dados["Somas"] = aplicar_sinal_entrada(dados["Somas"], tipo)
+                status = definir_status_por_descricao(dados["Descrição"])
+
+                registros.append({
+                    "_seq": seq,
+                    "Arquivo PDF": arquivo_txt,
+                    "Filial": filial,
+                    "Divisão": divisao,
+                    "Página": num_pagina_real,
+                    "Firma": meta["Firma"],
+                    "IE": meta["IE"],
+                    "CNPJ": meta["CNPJ"],
+                    "Período": meta["Período"],
+                    "Seção": secao_atual,
+                    "Tipo": tipo,
+                    "Status": status,
+                    **dados
+                })
+
+    return registros
+
 # =========================================================
 # CONFERÊNCIA
 # =========================================================
@@ -562,7 +945,7 @@ def montar_conferencia(df_cfop, df_resumo):
         ])
 
     base = pd.concat(partes, ignore_index=True)
-    base["Montante"] = pd.to_numeric(base["Montante"], errors="coerce").fillna(0)
+    base["Montante"] = pd.to_numeric(base["Montante"], errors="coerce").fillna(0).round(2)
 
     conf = (
         base.groupby(["Divisão", "Filial", "Status"], dropna=False, as_index=False)["Montante"]
@@ -578,10 +961,22 @@ def montar_conferencia(df_cfop, df_resumo):
         if col not in conf.columns:
             conf[col] = 0.0
 
+    conf["Entrada / Saída"] = pd.to_numeric(
+        conf["Entrada / Saída"], errors="coerce"
+    ).fillna(0).round(2)
+
+    conf["ICMS a Recolher ou Recuperar"] = pd.to_numeric(
+        conf["ICMS a Recolher ou Recuperar"], errors="coerce"
+    ).fillna(0).round(2)
+
+    # Total Geral = Apuração Vivo + Livro Entrada / Saída
     conf["Soma Total"] = (
-        pd.to_numeric(conf["Entrada / Saída"], errors="coerce").fillna(0)
-        + pd.to_numeric(conf["ICMS a Recolher ou Recuperar"], errors="coerce").fillna(0)
-    )
+        conf["Entrada / Saída"] + conf["ICMS a Recolher ou Recuperar"]
+    ).round(2)
+
+    # limpa resíduos tipo -0.00 / 0.00 quebrado
+    for col in ["Entrada / Saída", "ICMS a Recolher ou Recuperar", "Soma Total"]:
+        conf.loc[conf[col].abs() < 0.005, col] = 0.0
 
     conf = conf[[
         "Divisão",
@@ -591,7 +986,6 @@ def montar_conferencia(df_cfop, df_resumo):
         "Soma Total"
     ]]
     return conf
-
 
 # =========================================================
 # EXCEL
@@ -643,6 +1037,14 @@ def aplicar_formatacao_excel(caminho_arquivo):
 
     wb.save(caminho_arquivo)
 
+def salvar_cache_raicms(arquivo_final, arquivos_gerados=None):
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "arquivo_final": str(arquivo_final),
+        "arquivos_gerados": [str(x) for x in (arquivos_gerados or [])],
+    }
+    with open(CACHE_RAICMS_META, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
 
 # =========================================================
 # MOTOR DE PROCESSAMENTO
@@ -651,36 +1053,138 @@ def processar_raicms(pasta_pdfs, pasta_destino, progress_callback=None):
     t0 = time.time()
 
     mapa_divisao = carregar_mapa_divisao()
+    mapa_cfop = carregar_mapa_cfop()
 
     dados_cfop = []
     dados_resumo = []
+    nao_reconhecidos = []
+    arquivos_sem_dados = []
 
     arquivos_pdf = []
+    arquivos_txt = []
+
     for raiz, _, files in os.walk(pasta_pdfs):
         for f in files:
+            caminho_completo = os.path.join(raiz, f)
+
             if f.lower().endswith(".pdf"):
-                arquivos_pdf.append(os.path.join(raiz, f))
+                arquivos_pdf.append(caminho_completo)
+            elif f.lower().endswith(".txt"):
+                arquivos_txt.append(caminho_completo)
 
     arquivos_pdf = sorted(arquivos_pdf)
+    arquivos_txt = sorted(arquivos_txt)
 
-    if not arquivos_pdf:
-        raise FileNotFoundError("Nenhum PDF encontrado na pasta selecionada.")
+    if not arquivos_pdf and not arquivos_txt:
+        raise FileNotFoundError("Nenhum PDF ou TXT encontrado na pasta selecionada.")
 
-    total = len(arquivos_pdf)
+    pastas_com_txt = {os.path.dirname(x) for x in arquivos_txt}
 
-    for i, caminho_pdf in enumerate(arquivos_pdf, start=1):
+    arquivos_fonte = []
+
+    # TXTs têm prioridade total
+    arquivos_fonte.extend(arquivos_txt)
+
+    # PDFs só entram se a pasta não tiver TXT
+    for caminho_pdf in arquivos_pdf:
+        pasta_pdf = os.path.dirname(caminho_pdf)
+        if pasta_pdf not in pastas_com_txt:
+            arquivos_fonte.append(caminho_pdf)
+
+    arquivos_fonte = sorted(arquivos_fonte)
+    total = len(arquivos_fonte)
+
+    for i, caminho_fonte in enumerate(arquivos_fonte, start=1):
         if progress_callback:
-            progress_callback("processando_pdf", i, total, os.path.basename(caminho_pdf))
+            progress_callback("processando_pdf", i, total, os.path.basename(caminho_fonte))
 
-        dados_cfop.extend(processar_pdf_cfop(caminho_pdf, mapa_divisao))
-        dados_resumo.extend(processar_pdf_resumo(caminho_pdf, mapa_divisao))
+        eh_txt = caminho_fonte.lower().endswith(".txt")
+        filial_tmp = extrair_filial_do_arquivo(caminho_fonte)
+
+        if not filial_tmp:
+            if eh_txt:
+                try:
+                    texto_tmp = ler_txt_com_fallback(caminho_fonte)
+                    meta_tmp = extrair_cabecalho_pagina(texto_tmp)
+
+                    filial_tmp = encontrar_filial_priorizando_txts_da_pasta(
+                        caminho_fonte,
+                        meta_tmp["CNPJ"],
+                        meta_tmp["IE"]
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    with pdfplumber.open(caminho_fonte) as pdf_tmp:
+                        for pagina_tmp in pdf_tmp.pages:
+                            texto_tmp = pagina_tmp.extract_text() or ""
+
+                            if TITULO_ALVO not in texto_tmp:
+                                continue
+
+                            meta_tmp = extrair_cabecalho_pagina(texto_tmp)
+
+                            filial_tmp = encontrar_filial_priorizando_txts_da_pasta(
+                                caminho_fonte,
+                                meta_tmp["CNPJ"],
+                                meta_tmp["IE"]
+                            )
+
+                            if filial_tmp:
+                                break
+                except Exception:
+                    pass
+
+        divisao_tmp = resolver_divisao_por_filial_e_pasta(caminho_fonte, filial_tmp, mapa_divisao)
+
+        if not filial_tmp or not divisao_tmp:
+            pasta_fonte = os.path.dirname(caminho_fonte)
+
+            try:
+                qtd_arquivos_mesma_pasta = len([
+                    f for f in os.listdir(pasta_fonte)
+                    if f.lower().endswith(".pdf") or f.lower().endswith(".txt")
+                ])
+            except Exception:
+                qtd_arquivos_mesma_pasta = 0
+
+            if qtd_arquivos_mesma_pasta > 1:
+                nao_reconhecidos.append({
+                    "Arquivo PDF": os.path.basename(caminho_fonte),
+                    "Caminho Pasta": pasta_fonte,
+                    "Filial Reconhecida": filial_tmp,
+                    "Divisão Reconhecida": divisao_tmp,
+                    "Qtd PDFs na Pasta": qtd_arquivos_mesma_pasta
+                })
+
+        qtd_cfop_antes = len(dados_cfop)
+        qtd_resumo_antes = len(dados_resumo)
+
+        if eh_txt:
+            dados_cfop.extend(processar_txt_cfop(caminho_fonte, mapa_divisao, mapa_cfop))
+            dados_resumo.extend(processar_txt_resumo(caminho_fonte, mapa_divisao))
+        else:
+            dados_cfop.extend(processar_pdf_cfop(caminho_fonte, mapa_divisao, mapa_cfop))
+            dados_resumo.extend(processar_pdf_resumo(caminho_fonte, mapa_divisao))
+
+        qtd_cfop_depois = len(dados_cfop)
+        qtd_resumo_depois = len(dados_resumo)
+
+        if qtd_cfop_depois == qtd_cfop_antes and qtd_resumo_depois == qtd_resumo_antes:
+            arquivos_sem_dados.append({
+                "Arquivo Fonte": os.path.basename(caminho_fonte),
+                "Caminho Completo": caminho_fonte,
+                "Tipo Arquivo": "TXT" if eh_txt else "PDF",
+                "Filial Reconhecida": filial_tmp,
+                "Divisão Reconhecida": divisao_tmp
+            })
 
     df_cfop = pd.DataFrame(dados_cfop) if dados_cfop else pd.DataFrame(columns=[
         "Arquivo PDF", "Filial", "Divisão", "Página", "Firma", "IE", "CNPJ", "Período", "Tipo", "Status",
-        "CFOP", "Valores Contábeis", "Base de Cálculo", "Imposto Creditado",
+        "CFOP", "Mapeamento", "Valores Contábeis", "Base de Cálculo", "Imposto Creditado",
         "Isentas ou não Trib.", "Outras"
     ])
-
     df_resumo = pd.DataFrame(dados_resumo) if dados_resumo else pd.DataFrame(columns=[
         "Arquivo PDF", "Filial", "Divisão", "Página", "Firma", "IE", "CNPJ", "Período",
         "Seção", "Tipo", "Status", "Número", "Descrição", "Coluna Auxiliar", "Somas"
@@ -689,7 +1193,7 @@ def processar_raicms(pasta_pdfs, pasta_destino, progress_callback=None):
     if not df_cfop.empty:
         cols_ordem_cfop = [
             "Arquivo PDF", "Filial", "Divisão", "Página", "Firma", "IE", "CNPJ", "Período", "Tipo", "Status",
-            "CFOP", "Valores Contábeis", "Base de Cálculo", "Imposto Creditado",
+            "CFOP", "Mapeamento", "Valores Contábeis", "Base de Cálculo", "Imposto Creditado",
             "Isentas ou não Trib.", "Outras"
         ]
         df_cfop = df_cfop[cols_ordem_cfop]
@@ -736,7 +1240,7 @@ def processar_raicms(pasta_pdfs, pasta_destino, progress_callback=None):
             else:
                 pd.DataFrame(columns=[
                     "Arquivo PDF", "Filial", "Divisão", "Página", "Firma", "IE", "CNPJ", "Período", "Tipo", "Status",
-                    "CFOP", "Valores Contábeis", "Base de Cálculo", "Imposto Creditado",
+                    "CFOP", "Mapeamento", "Valores Contábeis", "Base de Cálculo", "Imposto Creditado",
                     "Isentas ou não Trib.", "Outras"
                 ]).to_excel(writer, index=False, sheet_name="Consolidado")
 
@@ -765,11 +1269,41 @@ def processar_raicms(pasta_pdfs, pasta_destino, progress_callback=None):
     aplicar_formatacao_excel(caminho_consolidado)
     arquivos_gerados.append(caminho_consolidado)
 
+    caminho_nao_reconhecidos = None
+
+    if nao_reconhecidos:
+        caminho_nao_reconhecidos = os.path.join(
+            pasta_destino,
+            "RAICMS - PDFs sem filial reconhecida.xlsx"
+        )
+
+        df_nao_reconhecidos = pd.DataFrame(nao_reconhecidos).drop_duplicates()
+        df_nao_reconhecidos.to_excel(caminho_nao_reconhecidos, index=False)
+        arquivos_gerados.append(caminho_nao_reconhecidos)
+
+    caminho_sem_dados = None
+
+    if arquivos_sem_dados:
+        caminho_sem_dados = os.path.join(
+            pasta_destino,
+            "RAICMS - Arquivos sem dados extraídos.xlsx"
+        )
+
+        df_sem_dados = pd.DataFrame(arquivos_sem_dados).drop_duplicates()
+        df_sem_dados.to_excel(caminho_sem_dados, index=False)
+        arquivos_gerados.append(caminho_sem_dados)
+
+    salvar_cache_raicms(
+        arquivo_final=caminho_consolidado,
+        arquivos_gerados=arquivos_gerados,
+    )
     return {
         "arquivos_pdf": len(arquivos_pdf),
         "linhas_cfop": len(df_cfop),
         "linhas_resumo": len(df_resumo),
         "tempo_total": round(time.time() - t0, 2),
         "arquivo_final": caminho_consolidado,
-        "arquivos_gerados": arquivos_gerados
+        "arquivos_gerados": arquivos_gerados,
+        "arquivo_nao_reconhecidos": caminho_nao_reconhecidos,
+        "arquivo_sem_dados": caminho_sem_dados
     }

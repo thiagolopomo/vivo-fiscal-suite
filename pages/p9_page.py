@@ -9,10 +9,12 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QFrame,
     QFileDialog, QMessageBox, QTextEdit, QLineEdit, QSizePolicy, QProgressBar,
-    QGraphicsDropShadowEffect, QBoxLayout
+    QGraphicsDropShadowEffect, QBoxLayout, QCheckBox, QComboBox
 )
+from conferencia_logic import listar_execucoes_conferencia
 
 from workers.p9_worker import P9Worker
+from workers.conference_worker import ConferenceWorker
 
 
 class HoverCard(QFrame):
@@ -152,8 +154,6 @@ class ResponsiveGrid(QWidget):
         width = max(1, self.width())
         parent_w = self.parentWidget().width() if self.parentWidget() else width
 
-        # Quando o container do resumo fica largo em telas 100%,
-        # empilha os cards para aproveitar melhor a altura/largura visual.
         if parent_w >= 430:
             return 1
 
@@ -200,11 +200,10 @@ class PathCard(HoverCard):
         self.setObjectName("PremiumPathCard")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.setMinimumHeight(168)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(4)
 
         accent = QFrame()
         accent.setObjectName("CardAccentLine")
@@ -214,7 +213,6 @@ class PathCard(HoverCard):
 
         lb_eyebrow = QLabel(eyebrow)
         lb_eyebrow.setObjectName("SectionEyebrow")
-        lb_eyebrow.setWordWrap(True)
         layout.addWidget(lb_eyebrow)
 
         lb_title = QLabel(titulo)
@@ -230,30 +228,22 @@ class PathCard(HoverCard):
         self.input = QLineEdit()
         self.input.setReadOnly(True)
         self.input.setPlaceholderText("Nenhuma pasta selecionada")
-        self.input.setMinimumHeight(42)
-        self.input.setMaximumHeight(42)
-        self.input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.input.setObjectName("PathInput")
         layout.addWidget(self.input)
 
-        layout.addSpacing(4)
-
         self.btn = QPushButton(texto_botao)
         self.btn.setObjectName("SecondaryButton")
-        self.btn.setMinimumHeight(42)
-        self.btn.setMaximumHeight(42)
-        self.btn.setMinimumWidth(175)
-        self.btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.btn.clicked.connect(on_click)
 
         btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setContentsMargins(0, 4, 0, 0)
         btn_row.setSpacing(0)
-        btn_row.addWidget(self.btn, 0, Qt.AlignLeft | Qt.AlignTop)
+        btn_row.addWidget(self.btn, 0, Qt.AlignLeft)
         btn_row.addStretch(1)
 
         layout.addLayout(btn_row)
-        layout.addStretch(1)
 
 
 class MetricBox(QFrame):
@@ -263,12 +253,10 @@ class MetricBox(QFrame):
         self.setObjectName("PremiumMetricBox")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.setMinimumHeight(68)
-        self.setMaximumHeight(96)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(3)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(2)
 
         accent = QFrame()
         accent.setObjectName("MetricAccentLine")
@@ -293,6 +281,7 @@ class P9Page(QWidget):
     def __init__(self):
         super().__init__()
         self.worker = None
+        self.conference_worker = None
 
         self._last_layout_mode = None
         self._last_action_mode = None
@@ -312,24 +301,37 @@ class P9Page(QWidget):
         outer.setContentsMargins(14, 14, 14, 14)
         outer.setSpacing(8)
 
-        header = QVBoxLayout()
-        header.setSpacing(4)
+        # ── HERO HEADER (compacto, mesmo padrão ZTMM) ──
+        hero = QFrame()
+        hero.setObjectName("PageHeroCard")
+        hero.setAttribute(Qt.WA_StyledBackground, True)
+        hero_lay = QHBoxLayout(hero)
+        hero_lay.setContentsMargins(16, 12, 16, 12)
+        hero_lay.setSpacing(10)
 
-        lb1 = QLabel("PDF VALIDATION")
-        lb1.setObjectName("SectionEyebrow")
-        header.addWidget(lb1)
+        hero_icon = QFrame()
+        hero_icon.setObjectName("AnaliseIconFrame")
+        hero_icon.setFixedSize(36, 36)
+        hi_lay = QVBoxLayout(hero_icon)
+        hi_lay.setContentsMargins(0, 0, 0, 0)
+        hi_lb = QLabel("P9")
+        hi_lb.setAlignment(Qt.AlignCenter)
+        hi_lb.setStyleSheet("font-size:11px; font-weight:800; color:#FFF; background:transparent;")
+        hi_lay.addWidget(hi_lb)
+        hero_lay.addWidget(hero_icon, 0, Qt.AlignVCenter)
 
-        lb2 = QLabel("Validação P9")
-        lb2.setObjectName("SectionTitle")
-        lb2.setWordWrap(True)
-        header.addWidget(lb2)
+        hero_text = QVBoxLayout()
+        hero_text.setSpacing(2)
+        ht1 = QLabel("Validação P9")
+        ht1.setStyleSheet("font-size:17px; font-weight:800; color:#182235; background:transparent;")
+        hero_text.addWidget(ht1)
+        ht2 = QLabel("Leitura de PDFs fiscais com geração de consolidado em Excel.")
+        ht2.setObjectName("FieldText")
+        ht2.setWordWrap(True)
+        hero_text.addWidget(ht2)
+        hero_lay.addLayout(hero_text, 1)
 
-        lb3 = QLabel("Leitura de PDFs com geração de consolidado em Excel.")
-        lb3.setObjectName("SectionText")
-        lb3.setWordWrap(True)
-        header.addWidget(lb3)
-
-        outer.addLayout(header)
+        outer.addWidget(hero)
 
         divider = QFrame()
         divider.setObjectName("SectionDivider")
@@ -337,6 +339,7 @@ class P9Page(QWidget):
         divider.setFixedHeight(1)
         outer.addWidget(divider)
 
+        # ── PATH CARDS ────────────────────────────────────────────────
         self.paths_layout = QBoxLayout(QBoxLayout.LeftToRight)
         self.paths_layout.setSpacing(12)
 
@@ -360,6 +363,7 @@ class P9Page(QWidget):
         self.paths_layout.addWidget(self.card_destino, 1)
         outer.addLayout(self.paths_layout)
 
+        # ── ACTION ROW ────────────────────────────────────────────────
         self.action_row = QBoxLayout(QBoxLayout.LeftToRight)
         self.action_row.setSpacing(8)
         self.action_row.setContentsMargins(0, 0, 0, 0)
@@ -376,12 +380,105 @@ class P9Page(QWidget):
         self.action_row.addStretch(1)
         outer.addLayout(self.action_row)
 
+        # ── CONFERÊNCIA SECTION ───────────────────────────────────────
+        # ── CONFERÊNCIA (compacta, mesmo padrão ZTMM) ──
+        self.conf_card = HoverCard()
+        self.conf_card.setObjectName("PremiumPathCard")
+        self.conf_card.setAttribute(Qt.WA_StyledBackground, True)
+        self.conf_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        conf_layout = QVBoxLayout(self.conf_card)
+        conf_layout.setContentsMargins(14, 10, 14, 10)
+        conf_layout.setSpacing(5)
+
+        conf_acc = QFrame()
+        conf_acc.setObjectName("CardAccentLine")
+        conf_acc.setAttribute(Qt.WA_StyledBackground, True)
+        conf_acc.setFixedHeight(2)
+        conf_layout.addWidget(conf_acc)
+
+        # Header: título + botão na mesma linha
+        conf_hdr = QHBoxLayout()
+        conf_hdr.setSpacing(8)
+        conf_hdr.setContentsMargins(0, 0, 0, 0)
+
+        conf_title = QLabel("Conferência P9 x Base Fiscal")
+        conf_title.setObjectName("FieldTitle")
+        conf_title.setStyleSheet("font-size:12px; font-weight:700; color:#1F293B; background:transparent;")
+        conf_hdr.addWidget(conf_title, 1, Qt.AlignVCenter)
+
+        self.btn_conferencia = QPushButton("Executar Conferência")
+        self.btn_conferencia.setObjectName("SecondaryButton")
+        self.btn_conferencia.setCursor(Qt.PointingHandCursor)
+        self.btn_conferencia.setMinimumHeight(32)
+        self.btn_conferencia.setMaximumHeight(36)
+        self.btn_conferencia.setEnabled(False)
+        self.btn_conferencia.clicked.connect(self.executar_conferencia)
+        conf_hdr.addWidget(self.btn_conferencia, 0, Qt.AlignVCenter)
+        conf_layout.addLayout(conf_hdr)
+
+        # Controles inline
+        base_row = QHBoxLayout()
+        base_row.setSpacing(8)
+        base_row.setContentsMargins(0, 0, 0, 0)
+        lb_base = QLabel("Base:")
+        lb_base.setObjectName("FieldText")
+        lb_base.setStyleSheet("font-size:10px; background:transparent;")
+        lb_base.setFixedWidth(70)
+        base_row.addWidget(lb_base, 0)
+        self.chk_andersen = QCheckBox("Andersen")
+        self.chk_vivo = QCheckBox("Vivo")
+        self.chk_andersen.setStyleSheet("font-size:10px;")
+        self.chk_vivo.setStyleSheet("font-size:10px;")
+        self.chk_andersen.stateChanged.connect(self.atualizar_estado_conferencia)
+        self.chk_vivo.stateChanged.connect(self.atualizar_estado_conferencia)
+        base_row.addWidget(self.chk_andersen, 0)
+        base_row.addWidget(self.chk_vivo, 0)
+        base_row.addStretch(1)
+        conf_layout.addLayout(base_row)
+
+        livro_row = QHBoxLayout()
+        livro_row.setSpacing(8)
+        livro_row.setContentsMargins(0, 0, 0, 0)
+        lb_livro = QLabel("Livro:")
+        lb_livro.setObjectName("FieldText")
+        lb_livro.setStyleSheet("font-size:10px; background:transparent;")
+        lb_livro.setFixedWidth(70)
+        livro_row.addWidget(lb_livro, 0)
+        self.cmb_livro = QComboBox()
+        self.cmb_livro.addItems(["Ambos", "Livro de Entrada", "Livro de Saída"])
+        self.cmb_livro.currentIndexChanged.connect(self.on_livro_changed)
+        self.cmb_livro.setMinimumHeight(28)
+        self.cmb_livro.setMaximumHeight(30)
+        self.cmb_livro.setStyleSheet("font-size:10px;")
+        self.cmb_livro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        livro_row.addWidget(self.cmb_livro, 1)
+        conf_layout.addLayout(livro_row)
+
+        exec_row = QHBoxLayout()
+        exec_row.setSpacing(8)
+        exec_row.setContentsMargins(0, 0, 0, 0)
+        lb_exec = QLabel("Base:")
+        lb_exec.setObjectName("FieldText")
+        lb_exec.setStyleSheet("font-size:10px; background:transparent;")
+        lb_exec.setFixedWidth(70)
+        exec_row.addWidget(lb_exec, 0)
+        self.cmb_execucao = QComboBox()
+        self.cmb_execucao.setMinimumHeight(28)
+        self.cmb_execucao.setMaximumHeight(30)
+        self.cmb_execucao.setStyleSheet("font-size:10px;")
+        self.cmb_execucao.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cmb_execucao.currentIndexChanged.connect(self.atualizar_estado_conferencia)
+        exec_row.addWidget(self.cmb_execucao, 1)
+        conf_layout.addLayout(exec_row)
+
+        outer.addWidget(self.conf_card)
+
+        # ── EXEC CARD (progress) ─────────────────────────────────────
         self.exec_card = HoverCard()
         self.exec_card.setObjectName("PremiumExecCard")
         self.exec_card.setAttribute(Qt.WA_StyledBackground, True)
         self.exec_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.exec_card.setMinimumHeight(96)
-        self.exec_card.setMaximumHeight(145)
 
         exec_layout = QVBoxLayout(self.exec_card)
         exec_layout.setContentsMargins(10, 8, 10, 8)
@@ -412,6 +509,7 @@ class P9Page(QWidget):
         self.progresso_texto.setObjectName("FieldText")
         exec_layout.addWidget(self.progresso_texto)
 
+        # ── BOTTOM LAYOUT (log + summary) ─────────────────────────────
         self.bottom_layout = QBoxLayout(QBoxLayout.LeftToRight)
         self.bottom_layout.setContentsMargins(0, 0, 0, 0)
         self.bottom_layout.setSpacing(12)
@@ -430,12 +528,11 @@ class P9Page(QWidget):
         self.log_card = HoverCard()
         self.log_card.setObjectName("PremiumLogCard")
         self.log_card.setAttribute(Qt.WA_StyledBackground, True)
-        self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
-        self.log_card.setMinimumHeight(110)
+        self.log_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         log_layout = QVBoxLayout(self.log_card)
-        log_layout.setContentsMargins(10, 8, 10, 8)
-        log_layout.setSpacing(6)
+        log_layout.setContentsMargins(8, 6, 8, 6)
+        log_layout.setSpacing(4)
 
         lg_acc = QFrame()
         lg_acc.setObjectName("CardAccentLine")
@@ -450,8 +547,7 @@ class P9Page(QWidget):
         self.saida = QTextEdit()
         self.saida.setReadOnly(True)
         self.saida.setPlaceholderText("A saída do processamento aparecerá aqui.")
-        self.saida.setMinimumHeight(60)
-        self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.saida.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         log_layout.addWidget(self.saida, 1)
 
         self.left_col.addWidget(self.log_card, 1)
@@ -460,9 +556,8 @@ class P9Page(QWidget):
         self.summary.setObjectName("PremiumSummaryCard")
         self.summary.setAttribute(Qt.WA_StyledBackground, True)
         self.summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.summary.setMinimumWidth(260)
-        self.summary.setMaximumWidth(340)
-        self.summary.setMinimumHeight(150)
+        self.summary.setMinimumWidth(200)
+        self.summary.setMaximumWidth(360)
 
         summary_layout = QVBoxLayout(self.summary)
         summary_layout.setContentsMargins(10, 8, 10, 8)
@@ -497,6 +592,77 @@ class P9Page(QWidget):
 
         self._apply_responsive_mode()
         self._apply_scale_mode()
+        self.carregar_execucoes_conferencia()
+
+    # ── LOGIC METHODS (unchanged) ─────────────────────────────────────
+
+    def _agrupar_execucoes_para_combo(self, execucoes, livro):
+        livro = (livro or "").strip()
+
+        if livro == "Livro de Entrada":
+            itens = []
+            for meta in execucoes:
+                if str(meta.get("tipo_movimento", "")).strip().upper() == "ENTRADA":
+                    label = meta.get("label", "Execução sem identificação")
+                    itens.append((label, meta))
+            return itens
+
+        if livro == "Livro de Saída":
+            itens = []
+            for meta in execucoes:
+                if str(meta.get("tipo_movimento", "")).strip().upper() == "SAIDA":
+                    label = meta.get("label", "Execução sem identificação")
+                    itens.append((label, meta))
+            return itens
+
+        # AMBOS: agrupa só por período
+        # porque entrada e saída normalmente vêm de pastas diferentes
+        pares = {}
+        for meta in execucoes:
+            periodo = str(meta.get("periodo", "")).strip()
+            tipo = str(meta.get("tipo_movimento", "")).strip().upper()
+
+            if not periodo:
+                continue
+
+            if periodo not in pares:
+                pares[periodo] = {"entrada": None, "saida": None}
+
+            if tipo == "ENTRADA" and pares[periodo]["entrada"] is None:
+                pares[periodo]["entrada"] = meta
+            elif tipo == "SAIDA" and pares[periodo]["saida"] is None:
+                pares[periodo]["saida"] = meta
+
+        itens = []
+        for periodo, par in pares.items():
+            if par["entrada"] and par["saida"]:
+                dir_ent = str(par["entrada"].get("base_dir_resumido") or par["entrada"].get("base_dir") or "")
+                dir_sai = str(par["saida"].get("base_dir_resumido") or par["saida"].get("base_dir") or "")
+
+                if dir_ent == dir_sai:
+                    label = f"{periodo} | Entrada + Saída | {dir_ent}"
+                else:
+                    label = f"{periodo} | Entrada + Saída | ENT: {dir_ent} | SAI: {dir_sai}"
+
+                data = {
+                    "modo": "AMBOS",
+                    "periodo": periodo,
+                    "entrada": par["entrada"],
+                    "saida": par["saida"],
+                }
+                itens.append((label, data))
+
+        itens.sort(key=lambda x: x[0], reverse=True)
+        return itens
+
+    def on_livro_changed(self):
+        self.carregar_execucoes_conferencia()
+        self.atualizar_estado_conferencia()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.carregar_execucoes_conferencia()
+        self.atualizar_estado_conferencia()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -506,43 +672,20 @@ class P9Page(QWidget):
 
     def _sync_summary_height(self):
         self.metric_grid._rebuild(force=True)
-        self.metric_grid.updateGeometry()
-
-        self.summary.layout().activate()
-        self.summary.adjustSize()
-
-        margins = self.summary.layout().contentsMargins()
-        spacing = self.summary.layout().spacing()
-
-        total_h = (
-            margins.top()
-            + margins.bottom()
-            + 2
-            + self.summary.layout().itemAt(1).sizeHint().height()
-            + spacing * 2
-            + self.metric_grid.minimumSizeHint().height()
-            + 10
-        )
-
-        self.summary.setMinimumHeight(max(150, total_h))
-        self.summary.updateGeometry()
-
-    
 
     def _apply_responsive_mode(self):
         w = self.width()
         h = self.height()
 
-        paths_vertical = w < 920
+        narrow = w < 920
         action_vertical = w < 700
-        bottom_vertical = w < 980
         compact = h < 760
 
-        layout_state = (bottom_vertical, compact)
+        layout_state = (narrow, compact)
         if self._last_layout_mode != layout_state:
             self._last_layout_mode = layout_state
 
-            if bottom_vertical:
+            if narrow:
                 self.bottom_layout.setDirection(QBoxLayout.TopToBottom)
                 self.bottom_layout.setSpacing(8)
 
@@ -559,25 +702,16 @@ class P9Page(QWidget):
                 self.summary.setMaximumWidth(summary_max)
                 self.summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
-            if compact:
-                self.exec_card.setMinimumHeight(92)
-                self.exec_card.setMaximumHeight(132)
-                self.log_card.setMinimumHeight(108)
-                self.summary.setMinimumHeight(140)
-                self.saida.setMinimumHeight(58)
-            else:
-                self.exec_card.setMinimumHeight(96)
-                self.exec_card.setMaximumHeight(145)
-                self.log_card.setMinimumHeight(120)
-                self.summary.setMinimumHeight(150)
-                self.saida.setMinimumHeight(64)
 
+        # Paths direction
+        paths_vertical = narrow
         if self._last_paths_mode != paths_vertical:
             self._last_paths_mode = paths_vertical
             self.paths_layout.setDirection(
                 QBoxLayout.TopToBottom if paths_vertical else QBoxLayout.LeftToRight
             )
 
+        # Action row direction
         if self._last_action_mode != action_vertical:
             self._last_action_mode = action_vertical
             if action_vertical:
@@ -589,53 +723,99 @@ class P9Page(QWidget):
 
     def _apply_scale_mode(self):
         w = self.width()
-        h = self.height()
-
-        roomy = w >= 1280 and h >= 820
-        medium = w >= 1080 and h >= 760
-        high_scale_compact = h < 860 and w < 1500
-
-        if roomy and not high_scale_compact:
-            self.metric_grid.min_item_width = 125
-
-            for box in (self.metric_pdfs, self.metric_cfop, self.metric_resumo):
-                box.setMinimumHeight(76)
-                box.setMaximumHeight(84)
-                box.lb_t.setStyleSheet(
-                    "font-size: 10px; font-weight: 700; color: #7F8BA0; background: transparent;"
-                )
-                box.lb_v.setStyleSheet(
-                    "font-size: 13px; font-weight: 800; color: #182235; background: transparent;"
-                )
-
-        elif medium:
-            self.metric_grid.min_item_width = 138
-
-            for box in (self.metric_pdfs, self.metric_cfop, self.metric_resumo):
-                box.setMinimumHeight(72)
-                box.setMaximumHeight(80)
-                box.lb_t.setStyleSheet(
-                    "font-size: 10px; font-weight: 700; color: #7F8BA0; background: transparent;"
-                )
-                box.lb_v.setStyleSheet(
-                    "font-size: 12px; font-weight: 800; color: #182235; background: transparent;"
-                )
-
+        if w >= 1200:
+            self.metric_grid.min_item_width = 120
+        elif w >= 1000:
+            self.metric_grid.min_item_width = 130
         else:
-            self.metric_grid.min_item_width = 150
-
-            for box in (self.metric_pdfs, self.metric_cfop, self.metric_resumo):
-                box.setMinimumHeight(68)
-                box.setMaximumHeight(76)
-                box.lb_t.setStyleSheet(
-                    "font-size: 9px; font-weight: 700; color: #7F8BA0; background: transparent;"
-                )
-                box.lb_v.setStyleSheet(
-                    "font-size: 11px; font-weight: 800; color: #182235; background: transparent;"
-                )
-
+            self.metric_grid.min_item_width = 100
         self.metric_grid._rebuild(force=True)
-        self._sync_summary_height()
+
+    def carregar_execucoes_conferencia(self):
+        self.cmb_execucao.clear()
+        self.cmb_execucao.addItem("Selecione uma base consolidada", None)
+
+        try:
+            execucoes = listar_execucoes_conferencia()
+        except Exception:
+            execucoes = []
+
+        livro = self.cmb_livro.currentText().strip() if hasattr(self, "cmb_livro") else "Ambos"
+        itens = self._agrupar_execucoes_para_combo(execucoes, livro)
+
+        for label, data in itens:
+            self.cmb_execucao.addItem(label, data)
+
+    def atualizar_estado_conferencia(self):
+        tem_base = self.chk_andersen.isChecked() or self.chk_vivo.isChecked()
+        tem_destino = bool(self.card_destino.input.text().strip())
+        tem_execucao = hasattr(self, "cmb_execucao") and self.cmb_execucao.currentData() is not None
+        self.btn_conferencia.setEnabled(tem_base and tem_destino and tem_execucao)
+
+    def executar_conferencia(self):
+        pasta_destino = self.card_destino.input.text().strip()
+
+        if not pasta_destino or not os.path.isdir(pasta_destino):
+            QMessageBox.critical(self, "Erro", "Selecione uma pasta de destino válida.")
+            return
+
+        bases = []
+        if self.chk_andersen.isChecked():
+            bases.append("Andersen")
+        if self.chk_vivo.isChecked():
+            bases.append("Vivo")
+
+        if not bases:
+            QMessageBox.critical(self, "Erro", "Selecione ao menos uma base para conferência.")
+            return
+
+        livro = self.cmb_livro.currentText().strip()
+
+        meta_execucao = self.cmb_execucao.currentData()
+        if not meta_execucao:
+            QMessageBox.critical(self, "Erro", "Selecione uma base consolidada.")
+            return
+
+        self.run_btn.setEnabled(False)
+        self.btn_conferencia.setEnabled(False)
+        self.status_texto.setText("Montando conferência...")
+        self.saida.setPlainText("Iniciando conferência P9 x Fiscal...")
+        self.progress.setValue(0)
+
+        self.conference_worker = ConferenceWorker(
+            bases_selecionadas=bases,
+            livro_filtro=livro,
+            pasta_destino=pasta_destino,
+            meta_execucao=meta_execucao,
+        )
+        self.conference_worker.progresso.connect(self.atualizar)
+        self.conference_worker.sucesso.connect(self.finalizar_conferencia_sucesso)
+        self.conference_worker.erro.connect(self.finalizar_conferencia_erro)
+        self.conference_worker.start()
+
+    def finalizar_conferencia_sucesso(self, resultado):
+        self.run_btn.setEnabled(True)
+        self.atualizar_estado_conferencia()
+        self.status_texto.setText("Conferência concluída.")
+        self.saida.setPlainText(f"Arquivo gerado: {resultado['arquivo_saida']}")
+        self.progress.setValue(100)
+        self.progresso_texto.setText("1 / 1")
+
+        QMessageBox.information(
+            self,
+            "Sucesso",
+            f"Conferência concluída.\n\n"
+            f"Linhas Fiscal: {resultado['linhas_fiscal']:,}\n"
+            f"Linhas P9: {resultado['linhas_p9']:,}\n"
+            f"Linhas Conferência: {resultado['linhas_conferencia']:,}\n\n"
+            f"Arquivo:\n{resultado['arquivo_saida']}"
+        )
+
+    def finalizar_conferencia_erro(self, erro):
+        self.run_btn.setEnabled(True)
+        self.atualizar_estado_conferencia()
+        self.status_texto.setText("Falha na conferência.")
+        QMessageBox.critical(self, "Erro", f"Falha ao executar conferência:\n{erro}")
 
     def selecionar_pasta_pdfs(self):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta com os PDFs")
@@ -646,6 +826,7 @@ class P9Page(QWidget):
         pasta = QFileDialog.getExistingDirectory(self, "Selecione a pasta de destino")
         if pasta:
             self.card_destino.input.setText(pasta)
+            self.atualizar_estado_conferencia()
 
     def atualizar(self, etapa, atual, total, detalhe):
         total_safe = total if total > 0 else 1
@@ -661,6 +842,9 @@ class P9Page(QWidget):
             self.saida.setPlainText(detalhe)
         elif etapa == "finalizado":
             self.status_texto.setText("Processamento concluído.")
+            self.saida.setPlainText(detalhe)
+        elif etapa == "conferencia":
+            self.status_texto.setText("Executando conferência...")
             self.saida.setPlainText(detalhe)
 
     def executar(self):
@@ -711,6 +895,8 @@ class P9Page(QWidget):
             f"Tempo total: {resultado['tempo_total']}s\n\n"
             f"Arquivo consolidado:\n{resultado['arquivo_final']}"
         )
+        self.carregar_execucoes_conferencia()
+        self.atualizar_estado_conferencia()
 
     def finalizar_erro(self, erro):
         self.run_btn.setEnabled(True)

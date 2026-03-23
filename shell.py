@@ -13,6 +13,7 @@ from resources import carregar_logo_vivo
 from pages.dashboard_page import DashboardPage
 from pages.p9_page import P9Page
 from pages.consolidator_page import ConsolidatorPage
+from pages.ztmm_page import ZtmmPage
 import json
 from pathlib import Path
 import time
@@ -105,19 +106,19 @@ class MainShell(QMainWindow):
 
         self.page_p9 = None
         self.page_consolidator = None
+        self.page_ztmm = None
 
         self.stack.addWidget(self.page_dashboard)
         self.stack.addWidget(QWidget())  # placeholder p9
         self.stack.addWidget(QWidget())  # placeholder consolidator
+        self.stack.addWidget(QWidget())  # placeholder ztmm
 
         self.nav_buttons = []
         self._add_nav_button("Visão geral", 0)
         self._add_nav_button("Validação P9", 1)
         self._add_nav_button("Consolidador Fiscal", 2)
 
-        btn_ztmm = NavButton("ZTMM X LIVRO (Em andamento)", 3)
-        btn_ztmm.setEnabled(False)
-        self.nav_layout.addWidget(btn_ztmm)
+        self._add_nav_button("ZTMM X LIVRO", 3)
 
         self.set_current_page(0)
 
@@ -369,6 +370,17 @@ class MainShell(QMainWindow):
             self.stack.removeWidget(old)
             old.deleteLater()
             self.stack.insertWidget(2, self.page_consolidator)
+
+        elif index == 3 and self.page_ztmm is None:
+            t = time.perf_counter()
+            print(f"[SHELL] criando ZtmmPage... {t - self._t0_shell:.3f}s")
+            self.page_ztmm = ZtmmPage()
+            print(f"[SHELL] ZtmmPage criada em: {time.perf_counter() - t:.3f}s")
+
+            old = self.stack.widget(3)
+            self.stack.removeWidget(old)
+            old.deleteLater()
+            self.stack.insertWidget(3, self.page_ztmm)
 
         self.stack.setCurrentIndex(index)
 

@@ -39,18 +39,32 @@ def iniciar_instalacao_update(extracted_dir: Path, parent=None):
 
     shutil.copy2(updater_exe, temp_updater)
 
-    subprocess.Popen(
-        [
-            str(temp_updater),
-            "--source-dir", str(extracted_dir),
-            "--app-dir", str(base_dir),
-            "--app-exe", str(app_exe),
-            "--wait-pid", str(os.getpid()),
-            "--ready-file", str(ready_file),
-        ],
-        cwd=str(temp_dir),
-        shell=False
+    args_str = (
+        f'--source-dir "{extracted_dir}" '
+        f'--app-dir "{base_dir}" '
+        f'--app-exe "{app_exe}" '
+        f'--wait-pid {os.getpid()} '
+        f'--ready-file "{ready_file}"'
     )
+
+    if os.name == "nt":
+        import ctypes
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", str(temp_updater), args_str, str(temp_dir), 1
+        )
+    else:
+        subprocess.Popen(
+            [
+                str(temp_updater),
+                "--source-dir", str(extracted_dir),
+                "--app-dir", str(base_dir),
+                "--app-exe", str(app_exe),
+                "--wait-pid", str(os.getpid()),
+                "--ready-file", str(ready_file),
+            ],
+            cwd=str(temp_dir),
+            shell=False
+        )
 
     # Espera real: só retorna quando o updater sinalizar que já abriu e assumiu a UX
     start = time.time()
