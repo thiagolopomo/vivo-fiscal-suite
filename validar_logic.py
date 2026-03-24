@@ -1005,9 +1005,31 @@ def renomear_colunas_parcial(df, mapa_renomeio):
     return df
 
 
-def exportar_versao_andersen(parquet_path, pasta_destino, progress_callback=None):
+def _extrair_periodo_do_parquet(parquet_path):
+    """Extrai o período do nome do parquet (BASE_INTERNA__{periodo}__{tipo}.parquet)."""
+    nome = Path(parquet_path).stem
+    partes = nome.split("__")
+    if len(partes) >= 2:
+        return partes[1]
+    return ""
+
+
+def exportar_versao_andersen(parquet_path, pasta_destino, tipo_movimento=None, progress_callback=None):
     pasta_destino = Path(pasta_destino)
-    out_csv = pasta_destino / "BASE_ANDERSEN.csv"
+    tipo_label = (tipo_movimento or "").strip().upper()
+    if tipo_label == "ENTRADA":
+        tipo_label = "Entrada"
+    elif tipo_label == "SAIDA":
+        tipo_label = "Saída"
+    periodo = _extrair_periodo_do_parquet(parquet_path)
+    sufixo = ""
+    if tipo_label and periodo:
+        sufixo = f" - {tipo_label}_{periodo}"
+    elif tipo_label:
+        sufixo = f" - {tipo_label}"
+    elif periodo:
+        sufixo = f" - {periodo}"
+    out_csv = pasta_destino / f"BASE_ANDERSEN{sufixo}.csv"
 
     pf = pq.ParquetFile(parquet_path)
     writer_iniciado = False
@@ -1279,7 +1301,9 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
             df = renomear_colunas_parcial(df, mapa_entrada)
             return df
 
-        nome_csv = "BASE_VIVO_ENTRADA.csv"
+        periodo = _extrair_periodo_do_parquet(parquet_path)
+        sufixo_periodo = f"_{periodo}" if periodo else ""
+        nome_csv = f"BASE_VIVO_ENTRADA{sufixo_periodo}.csv"
         processar_batch = processar_batch_entrada
 
     elif tipo == "SAIDA":
@@ -1414,7 +1438,9 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
             df = renomear_colunas_parcial(df, mapa_saida)
             return df
 
-        nome_csv = "BASE_VIVO_SAIDA.csv"
+        periodo = _extrair_periodo_do_parquet(parquet_path)
+        sufixo_periodo = f"_{periodo}" if periodo else ""
+        nome_csv = f"BASE_VIVO_SAIDA{sufixo_periodo}.csv"
         processar_batch = processar_batch_saida
 
     else:

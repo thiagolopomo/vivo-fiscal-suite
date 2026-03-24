@@ -65,6 +65,7 @@ class ConsolidatorExportWorker(QThread):
                 caminho_saida = exportar_versao_andersen(
                     self.parquet_path,
                     self.pasta_destino,
+                    tipo_movimento=self.tipo_movimento,
                     progress_callback=self.callback
                 )
             elif self.modo == "vivo":
