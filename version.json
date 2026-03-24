@@ -1,7 +1,7 @@
 {
-  "version": "2.1.17",
+  "version": "2.1.18",
   "mandatory": false,
-  "notes": "Card ZTMM no dashboard + ícone transparente",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.17/package.zip",
-  "sha256": "0bb88313a49592aeec161974516b6ef85d5e17778ff2ccb20845c18b4ed61231"
+  "notes": "Novo ícone do app",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.18/package.zip",
+  "sha256": "0ba9d82ba347a44ffa30746def8423402b29b4abf1a0d1e580af40cee6f91737"
 }

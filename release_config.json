@@ -1,6 +1,6 @@
 {
-    "version":  "2.1.17",
-    "notes":  "Card ZTMM no dashboard + ícone transparente",
+    "version":  "2.1.18",
+    "notes":  "Novo ícone do app",
     "mandatory":  false,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"
