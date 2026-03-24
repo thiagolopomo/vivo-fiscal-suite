@@ -1,7 +1,7 @@
 {
-  "version": "2.1.18",
+  "version": "2.1.19",
   "mandatory": false,
-  "notes": "Novo ícone do app",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.18/package.zip",
-  "sha256": "0ba9d82ba347a44ffa30746def8423402b29b4abf1a0d1e580af40cee6f91737"
+  "notes": "fix: botão conferência P9 + nomes CSVs com tipo/período",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.19/package.zip",
+  "sha256": "6fa1d6931aed056af2b261a94a62bcb2e5fcedcf6f4bdd162d5b43ee77aa118d"
 }

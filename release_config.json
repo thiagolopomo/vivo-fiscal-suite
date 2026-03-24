@@ -1,6 +1,6 @@
 {
-    "version":  "2.1.18",
-    "notes":  "Novo ícone do app",
+    "version":  "2.1.19",
+    "notes":  "fix: botão conferência P9 + nomes CSVs com tipo/período",
     "mandatory":  false,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"
