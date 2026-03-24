@@ -748,9 +748,8 @@ class P9Page(QWidget):
 
     def atualizar_estado_conferencia(self):
         tem_base = self.chk_andersen.isChecked() or self.chk_vivo.isChecked()
-        tem_destino = bool(self.card_destino.input.text().strip())
         tem_execucao = hasattr(self, "cmb_execucao") and self.cmb_execucao.currentData() is not None
-        self.btn_conferencia.setEnabled(tem_base and tem_destino and tem_execucao)
+        self.btn_conferencia.setEnabled(tem_base and tem_execucao)
 
     def executar_conferencia(self):
         pasta_destino = self.card_destino.input.text().strip()
