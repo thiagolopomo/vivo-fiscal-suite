@@ -690,7 +690,8 @@ class ZtmmPage(QWidget):
         self.saida.clear()
         self.progress.setValue(0)
 
-        self.consolidator_worker = ZtmmConsolidatorWorker(pasta)
+        from log_service import get_machine_id
+        self.consolidator_worker = ZtmmConsolidatorWorker(pasta, machine_id=get_machine_id())
         self.consolidator_worker.progresso.connect(self.atualizar)
         self.consolidator_worker.sucesso.connect(self._consolidacao_sucesso)
         self.consolidator_worker.erro.connect(self._consolidacao_erro)
@@ -739,7 +740,8 @@ class ZtmmPage(QWidget):
         self.status_texto.setText("Exportando CSV por divisão...")
         self.progress.setValue(0)
 
-        self.export_worker = ZtmmExportWorker(self.parquet_ztmm_path, selecionadas, pasta_destino)
+        from log_service import get_machine_id
+        self.export_worker = ZtmmExportWorker(self.parquet_ztmm_path, selecionadas, pasta_destino, machine_id=get_machine_id())
         self.export_worker.progresso.connect(self.atualizar)
         self.export_worker.sucesso.connect(self._exportacao_sucesso)
         self.export_worker.erro.connect(self._exportacao_erro)
@@ -782,7 +784,8 @@ class ZtmmPage(QWidget):
         self.saida.clear()
         self.progress.setValue(0)
 
-        self.analise_worker = ZtmmAnaliseWorker(self.parquet_ztmm_path, nc, razoes, dest)
+        from log_service import get_machine_id
+        self.analise_worker = ZtmmAnaliseWorker(self.parquet_ztmm_path, nc, razoes, dest, machine_id=get_machine_id())
         self.analise_worker.progresso.connect(self.atualizar)
         self.analise_worker.sucesso.connect(self._analise_sucesso)
         self.analise_worker.erro.connect(self._analise_erro)

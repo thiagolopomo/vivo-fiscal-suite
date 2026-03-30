@@ -15,6 +15,7 @@ from theme import build_app_qss
 from splash import SplashScreen
 from access import TelaAcesso
 from shell import MainShell
+from log_service import set_machine_id
 
 
 def limpar_caches_bases():
@@ -211,6 +212,8 @@ def main():
 
             shell.setWindowIcon(icone)
             log_tempo("setWindowIcon shell")
+
+            set_machine_id(acesso.machine_id)
 
             shell.set_user_context(
                 usuario=acesso.usuario_windows,

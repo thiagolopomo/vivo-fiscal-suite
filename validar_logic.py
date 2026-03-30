@@ -710,7 +710,7 @@ def montar_base_vivo_conferencia_filtrada(lf, tipo_movimento):
         return (
             lf2.with_columns(exprs_base + [
                 pl.lit("Vivo").alias("Base"),
-                pl.lit("Vivo").alias("Fonte"),
+                pl.lit("Livro de Entrada").alias("Fonte"),
                 pl.lit("Entrada").alias("Tipo"),
                 valor_expr.alias("Valor_ICMS_Conf"),
             ])
@@ -767,7 +767,7 @@ def montar_base_vivo_conferencia_filtrada(lf, tipo_movimento):
         return (
             lf2.with_columns(exprs_base + [
                 pl.lit("Vivo").alias("Base"),
-                pl.lit("Vivo").alias("Fonte"),
+                pl.lit("Livro de Saída").alias("Fonte"),
                 pl.lit("Saída").alias("Tipo"),
                 valor_expr.alias("Valor_ICMS_Conf"),
             ])
@@ -1014,7 +1014,334 @@ def _extrair_periodo_do_parquet(parquet_path):
     return ""
 
 
+def _build_text_column_formats(columns):
+    """Retorna dict de column_formats para colunas sensíveis (CNPJ, IE, Chave, etc.)"""
+    TEXT_KEYWORDS = ["CNPJ", "CPF", "IE", "CHAVE", "SERIE", "CHV_NFE",
+                     "Inscri", "NUM_FCI", "COD_CONT", "Chave"]
+    fmt = {}
+    for col_name in columns:
+        for kw in TEXT_KEYWORDS:
+            if kw.upper() in col_name.upper():
+                fmt[col_name] = {"num_format": "@"}
+                break
+    return fmt
+
+
+def _csv_para_xlsb_rapido(csv_path, xlsb_path, parquet_path=None,
+                           text_col_info=None, progress_callback=None):
+    """CSV -> XLSB via Excel COM.
+    Apos abrir o CSV, corrige colunas texto (CNPJ/IE/Chave) relendo do parquet
+    e colando como texto nativo no XLSB."""
+    import win32com.client as win32
+
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+
+    steps_total = 5
+    step = [0]
+
+    def report(msg):
+        step[0] += 1
+        if progress_callback:
+            progress_callback("convertendo_xlsb", step[0], steps_total, msg)
+
+    try:
+        csv_path = str(Path(csv_path).resolve())
+        xlsb_path = str(Path(xlsb_path).resolve())
+
+        report("Abrindo Excel...")
+        excel = win32.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+        excel.EnableEvents = False
+        excel.AskToUpdateLinks = False
+
+        try:
+            excel.AutoRecover.Enabled = False
+        except Exception:
+            pass
+
+        report("Lendo CSV...")
+        excel.Workbooks.OpenText(
+            Filename=csv_path,
+            Origin=65001,
+            StartRow=1,
+            DataType=1,
+            TextQualifier=1,
+            ConsecutiveDelimiter=False,
+            Tab=False,
+            Semicolon=True,
+            Comma=False,
+            Space=False,
+            Other=False,
+            Local=True,
+        )
+
+        wb = excel.ActiveWorkbook
+        ws = wb.Worksheets(1)
+        ws.Name = "Dados"
+
+        # Corrigir colunas texto relendo do parquet
+        if parquet_path and text_col_info:
+            report("Corrigindo colunas texto (CNPJ/IE/Chave)...")
+            last_row = ws.UsedRange.Rows.Count
+
+            for col_name, excel_col_idx in text_col_info:
+                try:
+                    # Ler coluna do parquet
+                    col_data = (
+                        pl.scan_parquet(str(parquet_path))
+                        .select(pl.col(col_name).cast(pl.Utf8).fill_null("").str.strip_chars())
+                        .collect()
+                    )[col_name].to_list()
+
+                    # Formatar coluna como texto
+                    col_letter = _col_letter(excel_col_idx)
+                    rng = ws.Range(f"{col_letter}2:{col_letter}{last_row}")
+                    rng.NumberFormat = "@"
+
+                    # Colar valores como tupla de tuplas (1 coluna)
+                    values = tuple((str(v),) for v in col_data)
+                    rng.Value = values
+
+                    del col_data, values
+                except Exception as e:
+                    report(f"  Aviso coluna {col_name}: {e}")
+
+        # Monitoramento de progresso em tempo real durante SaveAs
+        import threading
+
+        csv_size = os.path.getsize(csv_path) if os.path.exists(csv_path) else 0
+        estimated_xlsb = max(csv_size * 0.22, 10 * 1024 * 1024)
+
+        monitor_stop = threading.Event()
+
+        def _monitor():
+            last_pct = 0
+            while not monitor_stop.is_set():
+                monitor_stop.wait(timeout=1.5)
+                try:
+                    if os.path.exists(xlsb_path):
+                        sz = os.path.getsize(xlsb_path)
+                        pct = min(int((sz / estimated_xlsb) * 100), 99)
+                        if pct > last_pct:
+                            last_pct = pct
+                            mb = sz / (1024 * 1024)
+                            if progress_callback:
+                                progress_callback(
+                                    "convertendo_xlsb",
+                                    pct, 100,
+                                    f"Salvando XLSB... {pct}% ({mb:.0f} MB)"
+                                )
+                except Exception:
+                    pass
+
+        monitor_thread = threading.Thread(target=_monitor, daemon=True)
+        monitor_thread.start()
+
+        report("Salvando XLSB...")
+        wb.SaveAs(xlsb_path, FileFormat=50)
+
+        monitor_stop.set()
+        monitor_thread.join(timeout=2)
+
+        final_mb = os.path.getsize(xlsb_path) / (1024*1024) if os.path.exists(xlsb_path) else 0
+        if progress_callback:
+            progress_callback("convertendo_xlsb", 100, 100,
+                              f"XLSB salvo! ({final_mb:.0f} MB)")
+
+        wb.Close(False)
+        wb = None
+        excel.Quit()
+        excel = None
+
+    finally:
+        try:
+            if wb is not None:
+                wb.Close(False)
+        except Exception:
+            pass
+        try:
+            if excel is not None:
+                excel.Quit()
+        except Exception:
+            pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+
+def _col_letter(n):
+    """Converte indice 0-based para letra Excel (0=A, 25=Z, 26=AA, etc.)"""
+    result = ""
+    n += 1
+    while n > 0:
+        n -= 1
+        result = chr(65 + n % 26) + result
+        n //= 26
+    return result
+
+
+def _exportar_direto_excel(parquet_path, output_path, text_col_indices,
+                           processar_batch=None, file_format=50,
+                           batch_size=250_000, progress_callback=None):
+    """Injeta dados direto na memoria do Excel via Range.Value (sem CSV intermediario).
+    XLSB binario. Colunas texto pre-formatadas antes da injecao."""
+    import win32com.client as win32
+
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+
+    def report(msg):
+        if progress_callback:
+            progress_callback("exportando_xlsb", 1, 1, msg)
+
+    try:
+        output_path = str(Path(output_path).resolve())
+        text_set = set(text_col_indices or [])
+
+        report("Iniciando Excel...")
+        excel = win32.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+        excel.EnableEvents = False
+        excel.AskToUpdateLinks = False
+        try:
+            excel.Calculation = -4135  # xlCalculationManual
+        except Exception:
+            pass
+
+        try:
+            excel.AutoRecover.Enabled = False
+        except Exception:
+            pass
+
+        wb = excel.Workbooks.Add()
+        ws = wb.Worksheets(1)
+        ws.Name = "Dados"
+
+        pf = pq.ParquetFile(parquet_path)
+        row_cursor = 1  # 1-based (row 1 = header)
+        header_written = False
+        total_written = 0
+        col_count = 0
+        last_col_letter = ""
+
+        for batch in pf.iter_batches(batch_size=batch_size, use_threads=True):
+            df = pl.from_arrow(batch)
+
+            if processar_batch:
+                df = processar_batch(df)
+                if df.height == 0:
+                    continue
+
+            df = df.with_columns([
+                pl.col(c).str.strip_chars().alias(c)
+                for c in df.columns
+                if df.schema[c] == pl.Utf8
+            ])
+
+            columns = df.columns
+            col_count = len(columns)
+            last_col_letter = _col_letter(col_count - 1)
+
+            if not header_written:
+                # Pre-formatar colunas texto ANTES de injetar dados
+                report("Formatando colunas texto...")
+                for ci in text_set:
+                    if ci < col_count:
+                        try:
+                            ws.Columns(ci + 1).NumberFormat = "@"
+                        except Exception:
+                            pass
+
+                # Header
+                header_tuple = tuple(columns)
+                ws.Range(f"A1:{last_col_letter}1").Value = [header_tuple]
+                row_cursor = 2
+                header_written = True
+
+            # Converter dados para tupla de tuplas (transferencia COM rapida)
+            report(f"Injetando dados... ({total_written + df.height:,} linhas)")
+
+            # Para colunas texto, converter para string antes
+            pdf = df.to_pandas()
+            for ci in text_set:
+                if ci < col_count:
+                    col_name = columns[ci]
+                    if col_name in pdf.columns:
+                        pdf[col_name] = pdf[col_name].fillna("").astype(str)
+
+            # Substituir NaN por None (Excel blank) e converter
+            pdf = pdf.where(pdf.notna(), None)
+            data = tuple(tuple(row) for row in pdf.itertuples(index=False, name=None))
+
+            end_row = row_cursor + len(data) - 1
+            ws.Range(f"A{row_cursor}:{last_col_letter}{end_row}").Value = data
+            row_cursor = end_row + 1
+            total_written += len(data)
+
+            del pdf, data
+
+        if total_written == 0:
+            wb.Close(False)
+            wb = None
+            excel.Quit()
+            excel = None
+            # Criar arquivo vazio
+            pl.DataFrame().write_excel(workbook=output_path, worksheet="Dados")
+            return 0
+
+        fmt_name = "XLSB" if file_format == 50 else "XLSX"
+        report(f"Salvando {fmt_name} ({total_written:,} linhas)...")
+        wb.SaveAs(output_path, FileFormat=file_format)
+
+        wb.Close(False)
+        wb = None
+        excel.Quit()
+        excel = None
+
+        report(f"Concluido! {total_written:,} linhas")
+        return total_written
+
+    finally:
+        try:
+            if wb is not None:
+                wb.Close(False)
+        except Exception:
+            pass
+        try:
+            if excel is not None:
+                excel.Quit()
+        except Exception:
+            pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+
+def _detect_text_column_indices(columns):
+    """Retorna lista de indices (0-based) das colunas que devem ser texto."""
+    TEXT_KEYWORDS = ["CNPJ", "CPF", "IE", "CHAVE", "SERIE", "CHV_NFE",
+                     "Inscri", "NUM_FCI", "COD_CONT", "Chave"]
+    indices = []
+    for i, col_name in enumerate(columns):
+        for kw in TEXT_KEYWORDS:
+            if kw.upper() in col_name.upper():
+                indices.append(i)
+                break
+    return indices
+
+
 def exportar_versao_andersen(parquet_path, pasta_destino, tipo_movimento=None, progress_callback=None):
+    """Pipeline nuclear: CSV (Polars/Rust, ~10s) -> XLSX (Excel COM/C++, ~30s).
+    Total esperado: <1 minuto para 900k+ linhas x 116 colunas."""
     pasta_destino = Path(pasta_destino)
     tipo_label = (tipo_movimento or "").strip().upper()
     if tipo_label == "ENTRADA":
@@ -1029,30 +1356,23 @@ def exportar_versao_andersen(parquet_path, pasta_destino, tipo_movimento=None, p
         sufixo = f" - {tipo_label}"
     elif periodo:
         sufixo = f" - {periodo}"
-    out_csv = pasta_destino / f"BASE_ANDERSEN{sufixo}.csv"
+
+    out_xlsb = pasta_destino / f"BASE_ANDERSEN{sufixo}.xlsb"
+    tmp_csv = pasta_destino / f"_tmp_andersen{sufixo}.csv"
+
+    # PASSO 1: CSV com Polars (Rust nativo, ~10s)
+    if progress_callback:
+        progress_callback("exportando_csv", 1, 3, "Gerando CSV (Polars/Rust)...")
 
     pf = pq.ParquetFile(parquet_path)
     writer_iniciado = False
-
-    total_batches = 0
-    if pf.metadata:
-        for i in range(pf.metadata.num_row_groups):
-            rg = pf.metadata.row_group(i)
-            n = rg.num_rows
-            total_batches += max(1, (n + 249_999) // 250_000)
-
-    if total_batches <= 0:
-        total_batches = 1
-
-    batches_processados = 0
-    linhas_lidas = 0
     linhas_gravadas = 0
+    text_col_names_a = None
 
-    with open(out_csv, "w", encoding="utf-8", newline="") as f:
+    with open(tmp_csv, "w", encoding="utf-8", newline="") as f:
         f.write("\ufeff")
 
         for batch in pf.iter_batches(batch_size=250_000, use_threads=True):
-            linhas_lidas += batch.num_rows
             df = pl.from_arrow(batch)
 
             df = df.with_columns([
@@ -1061,40 +1381,46 @@ def exportar_versao_andersen(parquet_path, pasta_destino, tipo_movimento=None, p
                 if df.schema[c] == pl.Utf8
             ])
 
-            df.write_csv(
-                f,
-                separator=";",
-                include_header=not writer_iniciado,
-                null_value="",
-                line_terminator="\n",
-                quote_style="necessary"
-            )
+            if text_col_names_a is None:
+                idx = _detect_text_column_indices(df.columns)
+                text_col_names_a = [df.columns[i] for i in idx if i < len(df.columns)]
 
+            df.write_csv(f, separator=";", include_header=not writer_iniciado,
+                         null_value="", line_terminator="\n", quote_style="necessary")
             writer_iniciado = True
-            batches_processados += 1
             linhas_gravadas += df.height
 
-            if progress_callback and (
-                batches_processados == 1
-                or batches_processados == total_batches
-                or batches_processados % 5 == 0
-            ):
-                progress_callback(
-                    "exportando_csv",
-                    batches_processados,
-                    total_batches,
-                    f"Gerando CSV ANDERSEN | lote {batches_processados}/{total_batches} | lidas: {linhas_lidas:,} | gravadas: {linhas_gravadas:,}"
-                )
+    if progress_callback:
+        progress_callback("exportando_csv", 2, 3,
+                          f"CSV pronto ({linhas_gravadas:,}). Convertendo XLSB...")
+
+    # Montar info das colunas texto (nome_parquet, indice_excel)
+    text_info = []
+    if text_col_names_a:
+        # Pegar header do CSV pra achar indices
+        with open(tmp_csv, "r", encoding="utf-8-sig") as hf:
+            csv_header = hf.readline().strip().split(";")
+        for col_name in text_col_names_a:
+            if col_name in csv_header:
+                text_info.append((col_name, csv_header.index(col_name)))
+
+    # PASSO 2: CSV -> XLSB + corrigir colunas texto via parquet
+    try:
+        _csv_para_xlsb_rapido(str(tmp_csv), str(out_xlsb),
+                              parquet_path=parquet_path,
+                              text_col_info=text_info,
+                              progress_callback=progress_callback)
+    finally:
+        try:
+            tmp_csv.unlink()
+        except Exception:
+            pass
 
     if progress_callback:
-        progress_callback(
-            "finalizado_csv",
-            total_batches,
-            total_batches,
-            f"Exportação concluída | gravadas: {linhas_gravadas:,}"
-        )
+        progress_callback("finalizado_xlsb", 3, 3,
+                          f"XLSB concluido | {linhas_gravadas:,} linhas")
 
-    return out_csv
+    return out_xlsb
 
 
 def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_callback=None):
@@ -1118,78 +1444,98 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
             df = df.with_columns(exprs)
         return df
 
-    def escrever_csv_final(parquet_path, csv_out, processar_batch):
-        pf = pq.ParquetFile(parquet_path)
+    def escrever_xlsb_csv_com(parquet_path, xlsb_out, processar_batch):
+        """CSV (Polars/Rust) + XLSB (Excel COM). Mais rapido que Range.Value."""
+        import tempfile
 
-        total_batches = 0
-        if pf.metadata:
-            for i in range(pf.metadata.num_row_groups):
-                rg = pf.metadata.row_group(i)
-                n = rg.num_rows
-                total_batches += max(1, (n + 99_999) // 100_000)
+        if progress_callback:
+            progress_callback("exportando_csv", 1, 3, "Gerando CSV (Polars/Rust)...")
 
-        if total_batches <= 0:
-            total_batches = 1
+        tmp_csv = Path(tempfile.gettempdir()) / f"_tmp_vivo_{os.getpid()}.csv"
+        pf_inner = pq.ParquetFile(parquet_path)
+        writer_ok = False
+        linhas = 0
+        text_col_names = None
+        text_chunks = []
 
-        batches_processados = 0
-        linhas_lidas = 0
-        linhas_gravadas = 0
-        writer_iniciado = False
-
-        with open(csv_out, "w", encoding="utf-8", newline="") as f:
+        with open(tmp_csv, "w", encoding="utf-8", newline="") as f:
             f.write("\ufeff")
 
-            for batch in pf.iter_batches(batch_size=100_000, use_threads=True):
-                linhas_lidas += batch.num_rows
+            for batch in pf_inner.iter_batches(batch_size=200_000, use_threads=True):
                 df = pl.from_arrow(batch)
                 df = processar_batch(df)
-                batches_processados += 1
-
                 if df.height == 0:
-                    if progress_callback and (
-                        batches_processados == 1
-                        or batches_processados == total_batches
-                        or batches_processados % 5 == 0
-                    ):
-                        progress_callback(
-                            "exportando_csv",
-                            batches_processados,
-                            total_batches,
-                            f"Gerando CSV VIVO | lote {batches_processados}/{total_batches} | lidas: {linhas_lidas:,} | gravadas: {linhas_gravadas:,}"
-                        )
                     continue
 
                 df = df.with_columns([
                     pl.col(c).str.strip_chars().alias(c)
-                    for c in df.columns
-                    if df.schema[c] == pl.Utf8
+                    for c in df.columns if df.schema[c] == pl.Utf8
                 ])
 
-                df.write_csv(
-                    f,
-                    separator=";",
-                    include_header=not writer_iniciado,
-                    null_value="",
-                    line_terminator="\n",
-                    quote_style="necessary"
-                )
+                if text_col_names is None:
+                    idx = _detect_text_column_indices(df.columns)
+                    text_col_names = [df.columns[i] for i in idx if i < len(df.columns)]
 
-                writer_iniciado = True
-                linhas_gravadas += df.height
+                # Guardar valores texto pra corrigir depois
+                if text_col_names:
+                    existing = [c for c in text_col_names if c in df.columns]
+                    if existing:
+                        text_chunks.append(df.select([
+                            pl.col(c).cast(pl.Utf8).fill_null("").str.strip_chars()
+                            for c in existing
+                        ]))
 
-                if progress_callback and (
-                    batches_processados == 1
-                    or batches_processados == total_batches
-                    or batches_processados % 5 == 0
-                ):
-                    progress_callback(
-                        "exportando_csv",
-                        batches_processados,
-                        total_batches,
-                        f"Gerando CSV VIVO | lote {batches_processados}/{total_batches} | lidas: {linhas_lidas:,} | gravadas: {linhas_gravadas:,}"
-                    )
+                df.write_csv(f, separator=";", include_header=not writer_ok,
+                             null_value="", line_terminator="\n", quote_style="necessary")
+                writer_ok = True
+                linhas += df.height
 
-        return linhas_gravadas, total_batches
+        if not writer_ok:
+            open(str(xlsb_out), "w").close()
+            try:
+                tmp_csv.unlink()
+            except Exception:
+                pass
+            return 0, 1
+
+        if progress_callback:
+            progress_callback("exportando_csv", 2, 3,
+                              f"CSV pronto ({linhas:,}). Convertendo XLSB...")
+
+        # Salvar dados texto num parquet temporario pra corrigir depois
+        text_parquet_tmp = None
+        text_info_v = []
+        if text_chunks and text_col_names:
+            import tempfile
+            df_text = pl.concat(text_chunks, how="vertical_relaxed")
+            text_parquet_tmp = Path(tempfile.gettempdir()) / f"_tmp_text_{os.getpid()}.parquet"
+            df_text.write_parquet(str(text_parquet_tmp))
+            del df_text
+
+            with open(tmp_csv, "r", encoding="utf-8-sig") as hf:
+                csv_header = hf.readline().strip().split(";")
+            for col_name in text_col_names:
+                if col_name in csv_header:
+                    text_info_v.append((col_name, csv_header.index(col_name)))
+        del text_chunks
+
+        try:
+            _csv_para_xlsb_rapido(str(tmp_csv), str(xlsb_out),
+                                  parquet_path=str(text_parquet_tmp) if text_parquet_tmp else None,
+                                  text_col_info=text_info_v if text_info_v else None,
+                                  progress_callback=progress_callback)
+        finally:
+            try:
+                tmp_csv.unlink()
+            except Exception:
+                pass
+            if text_parquet_tmp:
+                try:
+                    text_parquet_tmp.unlink()
+                except Exception:
+                    pass
+
+        return linhas, 1
 
     if tipo == "ENTRADA":
         excluir_cfop = ["1923", "2923", "1915", "2915", "1154", "2154", "1403", "2403", "1555", "2555"]
@@ -1303,7 +1649,7 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
 
         periodo = _extrair_periodo_do_parquet(parquet_path)
         sufixo_periodo = f"_{periodo}" if periodo else ""
-        nome_csv = f"BASE_VIVO_ENTRADA{sufixo_periodo}.csv"
+        nome_csv = f"BASE_VIVO_ENTRADA{sufixo_periodo}.xlsb"
         processar_batch = processar_batch_entrada
 
     elif tipo == "SAIDA":
@@ -1440,29 +1786,29 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
 
         periodo = _extrair_periodo_do_parquet(parquet_path)
         sufixo_periodo = f"_{periodo}" if periodo else ""
-        nome_csv = f"BASE_VIVO_SAIDA{sufixo_periodo}.csv"
+        nome_csv = f"BASE_VIVO_SAIDA{sufixo_periodo}.xlsb"
         processar_batch = processar_batch_saida
 
     else:
         raise ValueError("Tipo de movimento não identificado para exportação VIVO.")
 
-    out_csv = Path(pasta_destino) / nome_csv
+    out_xlsx = Path(pasta_destino) / nome_csv
 
-    linhas_gravadas, total_batches = escrever_csv_final(
+    linhas_gravadas, total_batches = escrever_xlsb_csv_com(
         parquet_path=parquet_path,
-        csv_out=str(out_csv),
+        xlsb_out=str(out_xlsx),
         processar_batch=processar_batch
     )
 
     if progress_callback:
         progress_callback(
-            "finalizado_csv",
+            "finalizado_xlsx",
             total_batches,
             total_batches,
-            f"Exportação concluída | gravadas: {linhas_gravadas:,}"
+            f"Exportação XLSX concluída | gravadas: {linhas_gravadas:,}"
         )
 
-    return out_csv
+    return out_xlsx
 
 
 def criar_txt_limpo(path_txt, tmp_txt):
@@ -1495,7 +1841,11 @@ def criar_txt_limpo(path_txt, tmp_txt):
 
 
 def processar_arquivo(args):
-    path_txt_str, tmp_dir_str = args
+    if len(args) == 3:
+        path_txt_str, tmp_dir_str, tipo_mov = args
+    else:
+        path_txt_str, tmp_dir_str = args
+        tipo_mov = None
 
     path_txt = Path(path_txt_str)
     tmp_dir = Path(tmp_dir_str)
@@ -1552,8 +1902,16 @@ def processar_arquivo(args):
     else:
         expr_periodo = pl.lit("").alias("Período")
 
+    # Fonte baseada no tipo_movimento selecionado pelo usuario
+    if tipo_mov and tipo_mov.upper() == "ENTRADA":
+        fonte_label = "Livro de Entrada"
+    elif tipo_mov and tipo_mov.upper() == "SAIDA":
+        fonte_label = "Livro de Saída"
+    else:
+        fonte_label = "Livro de Entrada" if "DTENTR" in df.columns else "Livro de Saída"
+
     df = df.with_columns([
-        pl.lit("Vivo").alias("Fonte"),
+        pl.lit(fonte_label).alias("Fonte"),
         pl.lit(nome_arquivo).alias("Nome do Arquivo"),
         pl.lit(divisao_arquivo).alias("DivArquivo"),
         expr_periodo,
@@ -1645,7 +2003,7 @@ def consolidar_final(base_dir_str, progress_callback=None):
     total_linhas = 0
     total_arquivos = len(arquivos)
 
-    args = [(str(a), str(tmp_dir)) for a in arquivos]
+    args = [(str(a), str(tmp_dir), tipo_movimento) for a in arquivos]
 
     for i, arg in enumerate(args, start=1):
         res = processar_arquivo(arg)

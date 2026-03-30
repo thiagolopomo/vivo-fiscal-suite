@@ -781,11 +781,13 @@ class P9Page(QWidget):
         self.saida.setPlainText("Iniciando conferência P9 x Fiscal...")
         self.progress.setValue(0)
 
+        from log_service import get_machine_id
         self.conference_worker = ConferenceWorker(
             bases_selecionadas=bases,
             livro_filtro=livro,
             pasta_destino=pasta_destino,
             meta_execucao=meta_execucao,
+            machine_id=get_machine_id(),
         )
         self.conference_worker.progresso.connect(self.atualizar)
         self.conference_worker.sucesso.connect(self.finalizar_conferencia_sucesso)
@@ -869,7 +871,8 @@ class P9Page(QWidget):
         self.saida.clear()
         self.progress.setValue(0)
 
-        self.worker = P9Worker(pasta_pdfs, pasta_destino)
+        from log_service import get_machine_id
+        self.worker = P9Worker(pasta_pdfs, pasta_destino, machine_id=get_machine_id())
         self.worker.progresso.connect(self.atualizar)
         self.worker.sucesso.connect(self.finalizar_sucesso)
         self.worker.erro.connect(self.finalizar_erro)

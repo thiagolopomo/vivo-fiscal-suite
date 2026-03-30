@@ -1,7 +1,7 @@
 {
-  "version": "2.1.19",
+  "version": "2.2.0",
   "mandatory": false,
-  "notes": "fix: botão conferência P9 + nomes CSVs com tipo/período",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.1.19/package.zip",
-  "sha256": "6fa1d6931aed056af2b261a94a62bcb2e5fcedcf6f4bdd162d5b43ee77aa118d"
+  "notes": "feat: exportação XLSB, otimização de performance, coluna Fonte corrigida, telemetria e progresso de salvamento",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.2.0/package.zip",
+  "sha256": "d80ead83a34aa9c1362d5269df2ab90e09ee03510842ff5eebb054c4c5ee70fc"
 }

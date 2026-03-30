@@ -365,10 +365,25 @@ class ConsolidatorPage(QWidget):
             self.status_texto.setText("Base interna pronta.")
             self.saida.setPlainText(detalhe)
         elif etapa == "exportando_csv":
-            self.status_texto.setText("Gerando exportacao final...")
+            self.status_texto.setText("Gerando CSV intermediário...")
             self.saida.setPlainText(detalhe)
         elif etapa == "finalizado_csv":
-            self.status_texto.setText("Exportacao concluida.")
+            self.status_texto.setText("Exportação concluída.")
+            self.saida.setPlainText(detalhe)
+        elif etapa == "exportando_xlsb":
+            self.status_texto.setText("Preparando exportação XLSB...")
+            self.saida.setPlainText(detalhe)
+        elif etapa == "convertendo_xlsb":
+            self.status_texto.setText("Convertendo para Excel (XLSB)...")
+            self.saida.setPlainText(detalhe)
+        elif etapa == "finalizado_xlsb":
+            self.status_texto.setText("Exportação XLSB concluída!")
+            self.saida.setPlainText(detalhe)
+        elif etapa == "exportando_xlsx":
+            self.status_texto.setText("Gerando Excel...")
+            self.saida.setPlainText(detalhe)
+        elif etapa == "finalizado_xlsx":
+            self.status_texto.setText("Exportação concluída!")
             self.saida.setPlainText(detalhe)
 
     def executar(self):
@@ -396,7 +411,8 @@ class ConsolidatorPage(QWidget):
         self.saida.clear()
         self.progress.setValue(0)
 
-        self.worker = ConsolidatorProcessWorker(base_dir, pasta_destino)
+        from log_service import get_machine_id
+        self.worker = ConsolidatorProcessWorker(base_dir, pasta_destino, machine_id=get_machine_id())
         self.worker.progresso.connect(self.atualizar)
         self.worker.sucesso.connect(self.finalizar_sucesso)
         self.worker.erro.connect(self.finalizar_erro)
@@ -448,11 +464,13 @@ class ConsolidatorPage(QWidget):
         self.btn_andersen.setEnabled(False)
         self.btn_vivo.setEnabled(False)
 
+        from log_service import get_machine_id
         self.export_worker = ConsolidatorExportWorker(
             modo=modo,
             parquet_path=self.parquet_cache_path,
             pasta_destino=pasta_destino,
             tipo_movimento=self.tipo_movimento,
+            machine_id=get_machine_id(),
         )
         self.export_worker.progresso.connect(self.atualizar)
         self.export_worker.sucesso.connect(self.finalizar_export_sucesso)

@@ -17,6 +17,7 @@ from pages.ztmm_page import ZtmmPage
 import json
 from pathlib import Path
 import time
+from log_service import log_async
 
 
 def obter_versao_app():
@@ -386,6 +387,11 @@ class MainShell(QMainWindow):
 
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
+
+        # Log de navegacao
+        nav_map = {0: "nav_dashboard", 1: "nav_p9", 2: "nav_consolidador", 3: "nav_ztmm"}
+        if hasattr(self, "machine_id") and self.machine_id and self.machine_id != "—":
+            log_async(self.machine_id, nav_map.get(index, f"nav_{index}"))
 
         if index == 0:
             self.topbar.setVisible(False)

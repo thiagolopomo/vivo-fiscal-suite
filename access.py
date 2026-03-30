@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 
 from resources import carregar_logo_vivo
+from log_service import registrar_log, log_async
 
 APP_TITLE = "VIVO Fiscal Suite"
 CHECK_INTERVAL_MS = 3000
@@ -299,6 +300,7 @@ class TelaAcesso(QDialog):
             self.acesso_liberado = True
             self._set_status("Usuário já validado. Carregando app...")
             self.btn_solicitar.setVisible(False)
+            log_async(self.machine_id, "app_aberto", {"modo": "cache_local"})
             QTimer.singleShot(400, self.accept)
             return
 
@@ -313,11 +315,13 @@ class TelaAcesso(QDialog):
             if status == "aprovado":
                 self.acesso_liberado = True
                 _salvar_aprovacao(self.machine_id)
+                log_async(self.machine_id, "app_aberto", {"modo": "aprovacao_inicial"})
                 self._set_status("Acesso aprovado. Abrindo suíte...")
                 QTimer.singleShot(500, self.accept)
                 return
 
             if status == "negado":
+                log_async(self.machine_id, "acesso_negado")
                 self._set_status("Sua solicitação foi negada.", erro=True)
                 return
 
@@ -339,6 +343,7 @@ class TelaAcesso(QDialog):
         try:
             self.btn_solicitar.setEnabled(False)
             solicitar_acesso_remoto(self.machine_id, self.session_id)
+            log_async(self.machine_id, "solicitacao_enviada")
             self._set_status("Solicitação enviada. Aguardando aprovação...")
             self.iniciar_polling()
         except Exception as e:
@@ -362,6 +367,7 @@ class TelaAcesso(QDialog):
                 self._polling = False
                 self.acesso_liberado = True
                 _salvar_aprovacao(self.machine_id)
+                log_async(self.machine_id, "app_aberto", {"modo": "aprovacao_polling"})
                 self._set_status("Acesso aprovado. Abrindo suíte...")
                 QTimer.singleShot(500, self.accept)
                 return
@@ -370,6 +376,7 @@ class TelaAcesso(QDialog):
                 self.timer.stop()
                 self._polling = False
                 self.btn_solicitar.setEnabled(True)
+                log_async(self.machine_id, "acesso_negado_polling")
                 self._set_status("Sua solicitação foi negada.", erro=True)
                 return
 
