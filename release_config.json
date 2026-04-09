@@ -1,7 +1,7 @@
 {
-    "version":  "2.2.0",
-    "notes":  "feat: exportação XLSB, otimização de performance, coluna Fonte corrigida, telemetria e progresso de salvamento",
-    "mandatory":  false,
+    "version":  "2.2.1",
+    "notes":  "fix: consolidação ZTMM não trava mais o app com muitos arquivos grandes | perf: parser ~5-7x mais rápido via pl.read_csv nativo e paralelismo",
+    "mandatory":  true,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"
 }
