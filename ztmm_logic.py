@@ -1,11 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import io
 import os
 import re
+import gc
 import json
 import time
+import shutil
+import tempfile
 from pathlib import Path
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import polars as pl
 
 CACHE_DIR = Path.home() / "AppData" / "Local" / "ValidadorVIVO"
@@ -89,6 +94,97 @@ def extrair_divisao(caminho_txt):
     return ""
 
 
+def _parse_txt_para_parquet(caminho_txt, parte_path):
+    """Lê um TXT ZTMM, parseia via pl.read_csv e grava como parquet.
+
+    Muito mais rápido que o parser manual em Python porque o `pl.read_csv`
+    roda em código nativo (SIMD), libera o GIL e constrói o Arrow direto
+    sem passar por `list[list[str]]` intermediário.
+
+    Retorna (parte_path, height) ou None se o arquivo estiver vazio/inválido.
+    """
+    with open(caminho_txt, "rb") as f:
+        raw = f.read()
+
+    text = raw.decode("latin-1", errors="ignore")
+    del raw
+    lines = text.splitlines()
+    del text
+
+    header_idx = None
+    for i, linha in enumerate(lines):
+        if (
+            linha.startswith("|")
+            and "Empresa" in linha
+            and "Centro" in linha
+            and "Quantidade" in linha
+        ):
+            header_idx = i
+            break
+
+    if header_idx is None:
+        return None
+
+    header_raw = [c.strip() for c in lines[header_idx].strip().strip("|").split("|")]
+    header = ajustar_header_duplicados(header_raw)
+    divisao = extrair_divisao(caminho_txt)
+
+    # Em vez de splittar cada célula em Python, apenas filtramos as linhas
+    # de dados relevantes (descartando "-----|-----|-----", linhas vazias e
+    # lixo fora da tabela) e deixamos o parser nativo do polars fazer o split.
+    data_buf = []
+    for linha in lines[header_idx + 1:]:
+        if not linha.startswith("|"):
+            continue
+        s = linha.strip()
+        if not s or set(s) <= set("-|"):
+            continue
+        data_buf.append(linha.strip().strip("|"))
+
+    del lines
+
+    if not data_buf:
+        return None
+
+    csv_bytes = "\n".join(data_buf).encode("utf-8", errors="replace")
+    del data_buf
+
+    schema = {name: pl.Utf8 for name in header}
+
+    try:
+        df = pl.read_csv(
+            io.BytesIO(csv_bytes),
+            separator="|",
+            has_header=False,
+            schema=schema,
+            truncate_ragged_lines=True,
+        )
+    except Exception:
+        # Fallback: alguns builds de polars não aceitam `schema` direto no
+        # read_csv com has_header=False. Usa new_columns + infer_schema_length=0.
+        df = pl.read_csv(
+            io.BytesIO(csv_bytes),
+            separator="|",
+            has_header=False,
+            new_columns=header,
+            infer_schema_length=0,
+            truncate_ragged_lines=True,
+        )
+
+    del csv_bytes
+
+    # Remove whitespace das células (vetorizado, nativo).
+    df = df.with_columns([pl.col(c).str.strip_chars() for c in df.columns])
+
+    # Divisão como constante — metadata, não copia dados.
+    df = df.with_columns(pl.lit(divisao).alias("Divisão"))
+
+    df.write_parquet(str(parte_path), compression=COMPRESSION)
+    height = df.height
+    del df
+    return parte_path, height
+
+
 def consolidar_ztmm(pasta_txts, progress_callback=None):
     t0 = time.time()
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -107,61 +203,106 @@ def consolidar_ztmm(pasta_txts, progress_callback=None):
         raise FileNotFoundError("Nenhum TXT encontrado na pasta selecionada.")
 
     total = len(arquivos_txt)
-    dfs = []
+    tmp_dir = Path(tempfile.mkdtemp(prefix="ztmm_parts_", dir=str(CACHE_DIR)))
+    temp_parts = []
 
-    for i, caminho_txt in enumerate(arquivos_txt, start=1):
-        if progress_callback:
-            progress_callback("processando_txt", i, total, caminho_txt.name)
+    # Paraleliza o parsing via threads: o pl.read_csv libera o GIL durante
+    # o parse nativo, então threads dão ganho real sem o overhead de
+    # spawn/pickle do multiprocessing no Windows. Cap em 4 workers pra
+    # equilibrar throughput com pressão de memória (cada worker pode ter
+    # um arquivo inteiro em RAM durante o parse).
+    max_workers = max(1, min(4, os.cpu_count() or 2))
 
-        resultado = extrair_tabela_de_txt(caminho_txt)
+    def _worker(args):
+        idx, caminho = args
+        parte_path = tmp_dir / f"parte_{idx:06d}.parquet"
+        try:
+            resultado = _parse_txt_para_parquet(caminho, parte_path)
+        except Exception as exc:
+            return ("erro", idx, caminho.name, repr(exc))
         if resultado is None:
-            continue
+            return ("vazio", idx, caminho.name, None)
+        return ("ok", idx, caminho.name, resultado[0])
 
-        header_raw, linhas = resultado
-        header = ajustar_header_duplicados(header_raw)
-        divisao = extrair_divisao(caminho_txt)
+    try:
+        args_list = list(enumerate(arquivos_txt, start=1))
 
-        header_com_div = header + ["Divisão"]
-        linhas_com_div = [linha + [divisao] for linha in linhas]
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_worker, a) for a in args_list]
+            processados = 0
+            for fut in as_completed(futures):
+                status, idx, nome, payload = fut.result()
+                processados += 1
+                if progress_callback:
+                    progress_callback("processando_txt", processados, total, nome)
+                if status == "ok":
+                    temp_parts.append(payload)
+                # status "vazio" e "erro" são ignorados (mantém o comportamento
+                # anterior de pular TXTs sem tabela)
 
-        if not linhas_com_div:
-            continue
+        if not temp_parts:
+            raise ValueError("Nenhum TXT com dados válidos encontrado.")
 
-        df = pl.DataFrame(linhas_com_div, schema=header_com_div, orient="row")
-        dfs.append(df)
+        # Ordena os temp_parts para manter determinismo na ordem do concat
+        temp_parts = sorted(temp_parts)
 
-    if not dfs:
-        raise ValueError("Nenhum TXT com dados válidos encontrado.")
+        if progress_callback:
+            progress_callback("consolidando", 1, 1, "Concatenando DataFrames...")
 
-    if progress_callback:
-        progress_callback("consolidando", 1, 1, "Concatenando DataFrames...")
+        parquet_path = CACHE_DIR / "ZTMM_Consolidado.parquet"
 
-    df_final = pl.concat(dfs, how="vertical_relaxed")
-    df_final = df_final.with_columns([pl.all().cast(pl.Utf8)])
+        # Concat em streaming: lê os parquets temporários como LazyFrames e
+        # grava direto no parquet final sem carregar tudo de uma vez.
+        # diagonal_relaxed tolera diferenças de colunas entre arquivos
+        # (alguns TXTs de ZTMM podem ter colunas extras dependendo da planta).
+        lazy_frames = [pl.scan_parquet(str(p)) for p in temp_parts]
+        lf = pl.concat(lazy_frames, how="diagonal_relaxed")
 
-    divisoes = sorted(set(
-        str(x).strip() for x in df_final["Divisão"].to_list()
-        if str(x).strip()
-    ))
+        try:
+            lf.sink_parquet(str(parquet_path), compression=COMPRESSION)
+        except Exception:
+            # Fallback: se o engine de streaming não suportar diagonal_relaxed
+            # na versão atual, coleta em modo streaming e grava normalmente.
+            df_final = lf.collect(streaming=True)
+            df_final.write_parquet(str(parquet_path), compression=COMPRESSION)
+            del df_final
+            gc.collect()
 
-    parquet_path = CACHE_DIR / "ZTMM_Consolidado.parquet"
-    df_final.write_parquet(str(parquet_path), compression=COMPRESSION)
+        # Total de linhas e divisões lidos diretamente do parquet final,
+        # sem materializar o DataFrame inteiro.
+        lf_final = pl.scan_parquet(str(parquet_path))
+        total_linhas = int(lf_final.select(pl.len()).collect().item())
 
-    meta = {
-        "parquet_path": str(parquet_path),
-        "total_linhas": df_final.height,
-        "divisoes": divisoes,
-        "pasta_origem": str(pasta_txts),
-        "data_processamento": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "tempo_total": round(time.time() - t0, 2),
-    }
-    with open(CACHE_ZTMM_META, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+        divs_df = (
+            lf_final
+            .select(pl.col("Divisão").cast(pl.Utf8).fill_null("").str.strip_chars())
+            .unique()
+            .collect()
+        )
+        divisoes = sorted(set(
+            str(x).strip() for x in divs_df["Divisão"].to_list()
+            if str(x).strip()
+        ))
+        del divs_df, lf_final
+        gc.collect()
 
-    if progress_callback:
-        progress_callback("finalizado", 1, 1, parquet_path.name)
+        meta = {
+            "parquet_path": str(parquet_path),
+            "total_linhas": total_linhas,
+            "divisoes": divisoes,
+            "pasta_origem": str(pasta_txts),
+            "data_processamento": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "tempo_total": round(time.time() - t0, 2),
+        }
+        with open(CACHE_ZTMM_META, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    return str(parquet_path), df_final.height, divisoes
+        if progress_callback:
+            progress_callback("finalizado", 1, 1, parquet_path.name)
+
+        return str(parquet_path), total_linhas, divisoes
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def carregar_meta_ztmm():

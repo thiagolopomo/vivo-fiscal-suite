@@ -26,6 +26,9 @@ assets/updates/*.spec
 # Claude Code
 .claude/
 
+# Experimentos locais
+test_pq.py
+
 # Windows
 Thumbs.db
 Desktop.ini
