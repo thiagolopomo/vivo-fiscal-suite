@@ -1,7 +1,7 @@
 {
-  "version": "2.2.1",
+  "version": "2.2.2",
   "mandatory": true,
-  "notes": "fix: consolidação ZTMM não trava mais o app com muitos arquivos grandes | perf: parser ~5-7x mais rápido via pl.read_csv nativo e paralelismo",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.2.1/package.zip",
-  "sha256": "c29fd32bb52ae33ccaa88e4c62e7cbcc5a489bb0c13f0847f47ce1976c094f42"
+  "notes": "fix CRITICO: consolidacao fiscal perdia VAL_ICMS em ~0,3% das linhas (pipes extras do SAP iam pro DSC e shiftavam VAL_ICMS pra 0) | perf: consolidacao Livro de Entrada 45% mais rapida | 85MN -> 85MG normalizado tambem no ZTMM",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.2.2/package.zip",
+  "sha256": "daeed18bdeb37a3f7ac43c3329ed0a157a8f34614da1a62d61c207898b36e4df"
 }
