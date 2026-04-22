@@ -99,10 +99,13 @@ Assert-Exists ".\updater.exe" "updater.exe final"
 
 Set-Location "..\.."
 
-Write-Step "Compilando app principal"
-pyinstaller `
-  --noconfirm `
-  --clean `
+Write-Step "Gerando main.spec"
+# Usamos pyi-makespec + edição do spec em vez de pyinstaller direto porque
+# precisamos injetar `sys.setrecursionlimit(...)` no topo do spec. O grafo
+# de imports do app ficou fundo demais pra o default do Python (1000) depois
+# que pacotes como pydantic/xyzservices/bokeh entraram na análise, causando
+# `RecursionError` no pyinstaller analysis.
+pyi-makespec `
   --windowed `
   --onedir `
   --name "main" `
@@ -126,6 +129,20 @@ pyinstaller `
   --hidden-import "ztmm_analise_logic" `
   --hidden-import "conferencia_logic" `
   main.py
+
+Assert-Exists ".\main.spec" "main.spec"
+
+Write-Step "Injetando sys.setrecursionlimit no main.spec"
+$specPath = Join-Path $ProjectRoot "main.spec"
+$specContent = Get-Content $specPath -Raw
+$recursionHeader = "# -*- mode: python ; coding: utf-8 -*-`r`nimport sys`r`nsys.setrecursionlimit(sys.getrecursionlimit() * 5)`r`n"
+# Remove o comentário default do mode-line se ele já estiver no topo
+$specContent = $specContent -replace "^# -\*- mode: python ; coding: utf-8 -\*-\s*", ""
+$specContent = $recursionHeader + $specContent
+Write-Utf8NoBom $specPath $specContent
+
+Write-Step "Compilando app principal"
+pyinstaller --noconfirm --clean main.spec
 
 Assert-Exists ".\dist\main\main.exe" "main.exe"
 
