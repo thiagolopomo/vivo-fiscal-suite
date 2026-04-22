@@ -8,6 +8,7 @@ import time
 import json
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pyarrow.parquet as pq
 import pythoncom
@@ -426,20 +427,35 @@ def limpar_nomes_colunas(cols):
     return saida
 
 
+_REGEX_LINHAS_SELECIONADAS = re.compile(
+    r"\d+\s+linhas\s+selecionadas\.?",
+    flags=re.IGNORECASE,
+)
+
+
 def linha_eh_lixo(linha):
     s = linha.strip()
-    up = s.upper()
-
     if not s:
         return True
 
-    if set(s) <= {"-", "|"}:
+    # `s.strip("-|")` é muito mais rápido que `set(s) <= {"-","|"}`: evita
+    # construir um set e retorna string vazia só pra linhas de separador.
+    if not s.strip("-|"):
         return True
 
-    if "MNFSM_CHV_NFE" in up or "CHAVE DA NOTA" in up:
-        return True
+    # Header repetido no meio do arquivo começa com "CHAVE"/"MNFSM" (alfa).
+    # Linhas de dados começam com dígito (chave NFe de 44 caracteres). Um
+    # check de 1 char no primeiro caractere descarta 99% sem precisar chamar
+    # `s.upper()` na linha inteira.
+    first = s[0]
+    if first.isalpha():
+        up = s.upper()
+        if "MNFSM_CHV_NFE" in up or "CHAVE DA NOTA" in up:
+            return True
 
-    if re.fullmatch(r"\d+\s+linhas\s+selecionadas\.?", s, flags=re.IGNORECASE):
+    # Rodapé "N linhas selecionadas.": pré-filtro barato por substring antes
+    # do regex (evita custo em todas as linhas de dados normais).
+    if "linhas" in s and _REGEX_LINHAS_SELECIONADAS.fullmatch(s):
         return True
 
     return False
@@ -467,17 +483,45 @@ def descobrir_idx_dsc(header_cols):
     return None
 
 
+def descobrir_idx_merge_seguro(header_cols):
+    """Encontra uma coluna de texto livre *tardia* no header, ideal para
+    absorver os pipes extras sem corromper colunas numéricas críticas
+    (VAL_ICMS, BAS_ICMS, ALIQ_ICMS, etc).
+
+    O SAP injeta pipes literais dentro de campos de audit log como VAR05,
+    VAR04, OBSERVACAO — esses campos já são free-text e vêm depois dos
+    valores fiscais, então mesclar extras neles preserva o alinhamento
+    de VAL_ICMS e evita que o DSC-merging (hardcoded pra coluna 24) empurre
+    CFOP/NCM/NOPE pra dentro do DSC e shifte todas as colunas subsequentes.
+
+    Retorna None se nenhuma coluna segura for encontrada (cai no fallback
+    de mesclar no DSC, comportamento antigo).
+    """
+    prioridades = ["VAR05", "VAR04", "VAR03", "VAR02", "VAR01"]
+    upper_cols = [c.upper() for c in header_cols]
+    for alvo in prioridades:
+        if alvo in upper_cols:
+            return upper_cols.index(alvo)
+    return None
+
+
 def corrigir_pipe_na_descricao(linha, ncols, idx_dsc):
-    cols = linha.rstrip("\r\n").split("|")
+    linha = linha.rstrip("\r\n")
+
+    # Fast path: conta `|` sem fazer split. Se bater com o esperado, a linha
+    # não precisa ser modificada — devolve a string original direto.
+    # Isso pula o split+join custoso em ~99% das linhas (as correctamente
+    # formatadas), que são a grande maioria em volume.
+    if linha.count("|") == ncols - 1:
+        return linha
+
+    cols = linha.split("|")
 
     if idx_dsc is None:
         if len(cols) < ncols:
             cols.extend([""] * (ncols - len(cols)))
         elif len(cols) > ncols:
             cols = cols[:ncols]
-        return "|".join(cols)
-
-    if len(cols) == ncols:
         return "|".join(cols)
 
     if len(cols) < ncols:
@@ -1814,30 +1858,50 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
 def criar_txt_limpo(path_txt, tmp_txt):
     header_line, header_raw = detectar_header(path_txt)
     if header_line is None:
-        return None, None, 0
+        return None, None, 0, None
 
     header = limpar_nomes_colunas(header_raw)
     ncols = len(header)
     idx_dsc = descobrir_idx_dsc(header)
+    idx_seguro = descobrir_idx_merge_seguro(header)
+
+    # Escolhe onde absorver os `|` extras. Prioriza uma coluna tardia de
+    # free-text (VAR05 etc); só cai no DSC se nenhuma existir no header.
+    idx_merge = idx_seguro if idx_seguro is not None else idx_dsc
     kept = 0
 
-    with open(path_txt, "r", encoding="latin-1", errors="ignore") as fin, \
-         open(tmp_txt, "w", encoding="latin-1", errors="ignore", newline="") as fout:
+    # Buffers maiores reduzem o número de syscalls de write/read em ~100x
+    # para esses TXTs grandes. Default do Python é 8KB; 1MB é mais apropriado.
+    _BUF = 1024 * 1024
+
+    with open(path_txt, "r", encoding="latin-1", errors="ignore", buffering=_BUF) as fin, \
+         open(tmp_txt, "w", encoding="latin-1", errors="ignore", newline="", buffering=_BUF) as fout:
 
         for _ in range(header_line + 1):
             next(fin)
 
-        fout.write("|".join(header) + "\n")
+        # Acumula as linhas corrigidas numa lista e escreve em blocos grandes
+        # com writelines(), que é mais eficiente que chamar write() por linha.
+        # A lista é reciclada em chunks de 10k para manter o pico de memória
+        # baixo em arquivos muito longos.
+        buf_out = ["|".join(header) + "\n"]
+        FLUSH_EVERY = 10_000
 
         for linha in fin:
             if linha_eh_lixo(linha):
                 continue
 
-            linha_corrigida = corrigir_pipe_na_descricao(linha, ncols, idx_dsc)
-            fout.write(linha_corrigida + "\n")
+            buf_out.append(corrigir_pipe_na_descricao(linha, ncols, idx_merge) + "\n")
             kept += 1
 
-    return header, header_raw, kept
+            if len(buf_out) >= FLUSH_EVERY:
+                fout.writelines(buf_out)
+                buf_out.clear()
+
+        if buf_out:
+            fout.writelines(buf_out)
+
+    return header, header_raw, kept, idx_merge
 
 
 def processar_arquivo(args):
@@ -1853,7 +1917,7 @@ def processar_arquivo(args):
     shard_out = tmp_dir / f"{path_txt.stem}.parquet"
     txt_limpo = tmp_dir / f"{path_txt.stem}__limpo.txt"
 
-    header, header_raw, kept = criar_txt_limpo(path_txt, txt_limpo)
+    header, header_raw, kept, idx_merge = criar_txt_limpo(path_txt, txt_limpo)
     if header is None:
         return {"arquivo": path_txt.name, "linhas": 0, "ok": False, "motivo": "header não encontrado"}
 
@@ -1869,14 +1933,15 @@ def processar_arquivo(args):
         quote_char=None,
     )
 
-    idx_dsc = descobrir_idx_dsc(header)
-
-    if idx_dsc is not None:
-        col_dsc = header[idx_dsc]
+    # O PIPE_PLACEHOLDER foi gravado na coluna escolhida por `criar_txt_limpo`
+    # (que pode ser DSC ou VAR05, conforme o caso). Precisamos decodificá-lo
+    # EXATAMENTE naquela coluna.
+    if idx_merge is not None:
+        col_merge = header[idx_merge]
         df = df.with_columns(
-            pl.col(col_dsc)
+            pl.col(col_merge)
             .str.replace_all(PIPE_PLACEHOLDER, "|")
-            .alias(col_dsc)
+            .alias(col_merge)
         )
 
     nome_arquivo = path_txt.name

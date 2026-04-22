@@ -89,7 +89,13 @@ def extrair_divisao(caminho_txt):
     stem = Path(caminho_txt).stem.upper()
     m = re.match(r"^(\d{2}[A-Z]{2})(?:_|$)", stem)
     if m:
-        return m.group(1)
+        div = m.group(1)
+        # 85MN é um alias legado que aparece em nomes de arquivo mas não
+        # existe como divisão real — o valor correto é 85MG (Minas Gerais).
+        # Mesma normalização feita em validar_logic.py e raicms_logic.py.
+        if div == "85MN":
+            return "85MG"
+        return div
 
     return ""
 
@@ -151,6 +157,9 @@ def _parse_txt_para_parquet(caminho_txt, parte_path):
 
     schema = {name: pl.Utf8 for name in header}
 
+    # quote_char=None desliga o parsing de aspas, replicando o split("|") cru
+    # do parser antigo. Sem isso, o polars ao ver um `"` numa descrição
+    # entraria em modo "quoted" e engoliria os separadores seguintes.
     try:
         df = pl.read_csv(
             io.BytesIO(csv_bytes),
@@ -158,6 +167,7 @@ def _parse_txt_para_parquet(caminho_txt, parte_path):
             has_header=False,
             schema=schema,
             truncate_ragged_lines=True,
+            quote_char=None,
         )
     except Exception:
         # Fallback: alguns builds de polars não aceitam `schema` direto no
@@ -169,6 +179,7 @@ def _parse_txt_para_parquet(caminho_txt, parte_path):
             new_columns=header,
             infer_schema_length=0,
             truncate_ragged_lines=True,
+            quote_char=None,
         )
 
     del csv_bytes
