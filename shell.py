@@ -14,6 +14,7 @@ from pages.dashboard_page import DashboardPage
 from pages.p9_page import P9Page
 from pages.consolidator_page import ConsolidatorPage
 from pages.ztmm_page import ZtmmPage
+from pages.icms_transitorias_page import IcmsTransitoriasPage
 import json
 from pathlib import Path
 import time
@@ -108,18 +109,20 @@ class MainShell(QMainWindow):
         self.page_p9 = None
         self.page_consolidator = None
         self.page_ztmm = None
+        self.page_transit = None
 
         self.stack.addWidget(self.page_dashboard)
         self.stack.addWidget(QWidget())  # placeholder p9
         self.stack.addWidget(QWidget())  # placeholder consolidator
         self.stack.addWidget(QWidget())  # placeholder ztmm
+        self.stack.addWidget(QWidget())  # placeholder ICMS Transitórias
 
         self.nav_buttons = []
         self._add_nav_button("Visão geral", 0)
         self._add_nav_button("Validação P9", 1)
         self._add_nav_button("Consolidador Fiscal", 2)
-
         self._add_nav_button("ZTMM X LIVRO", 3)
+        self._add_nav_button("ICMS Transitórias", 4)
 
         self.set_current_page(0)
 
@@ -383,13 +386,24 @@ class MainShell(QMainWindow):
             old.deleteLater()
             self.stack.insertWidget(3, self.page_ztmm)
 
+        elif index == 4 and self.page_transit is None:
+            t = time.perf_counter()
+            print(f"[SHELL] criando IcmsTransitoriasPage... {t - self._t0_shell:.3f}s")
+            self.page_transit = IcmsTransitoriasPage()
+            print(f"[SHELL] IcmsTransitoriasPage criada em: {time.perf_counter() - t:.3f}s")
+
+            old = self.stack.widget(4)
+            self.stack.removeWidget(old)
+            old.deleteLater()
+            self.stack.insertWidget(4, self.page_transit)
+
         self.stack.setCurrentIndex(index)
 
         for i, btn in enumerate(self.nav_buttons):
             btn.setChecked(i == index)
 
         # Log de navegacao
-        nav_map = {0: "nav_dashboard", 1: "nav_p9", 2: "nav_consolidador", 3: "nav_ztmm"}
+        nav_map = {0: "nav_dashboard", 1: "nav_p9", 2: "nav_consolidador", 3: "nav_ztmm", 4: "nav_transit"}
         if hasattr(self, "machine_id") and self.machine_id and self.machine_id != "—":
             log_async(self.machine_id, nav_map.get(index, f"nav_{index}"))
 

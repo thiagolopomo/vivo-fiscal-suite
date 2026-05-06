@@ -1058,6 +1058,29 @@ def _extrair_periodo_do_parquet(parquet_path):
     return ""
 
 
+def _periodo_mm_yyyy(parquet_path):
+    """Converte o período YYYY_MM (formato interno do parquet) para MM_YYYY,
+    que é o padrão pedido para os nomes dos arquivos exportados.
+    Ex.: '2026_03' -> '03_2026'. Se vier algo inesperado, retorna como veio.
+    """
+    periodo = _extrair_periodo_do_parquet(parquet_path)
+    partes = periodo.split("_")
+    if len(partes) == 2 and len(partes[0]) == 4 and len(partes[1]) == 2:
+        return f"{partes[1]}_{partes[0]}"
+    return periodo
+
+
+def _nome_tipo_plural(tipo_movimento):
+    """ENTRADA -> 'Entradas', SAIDA -> 'Saídas'. Usado nos nomes dos arquivos
+    exportados (Versão Vivo / Versão Completa Andersen)."""
+    tipo = (tipo_movimento or "").strip().upper()
+    if tipo == "ENTRADA":
+        return "Entradas"
+    if tipo == "SAIDA":
+        return "Saídas"
+    return tipo or "Movimento"
+
+
 def _build_text_column_formats(columns):
     """Retorna dict de column_formats para colunas sensíveis (CNPJ, IE, Chave, etc.)"""
     TEXT_KEYWORDS = ["CNPJ", "CPF", "IE", "CHAVE", "SERIE", "CHV_NFE",
@@ -1387,22 +1410,12 @@ def exportar_versao_andersen(parquet_path, pasta_destino, tipo_movimento=None, p
     """Pipeline nuclear: CSV (Polars/Rust, ~10s) -> XLSX (Excel COM/C++, ~30s).
     Total esperado: <1 minuto para 900k+ linhas x 116 colunas."""
     pasta_destino = Path(pasta_destino)
-    tipo_label = (tipo_movimento or "").strip().upper()
-    if tipo_label == "ENTRADA":
-        tipo_label = "Entrada"
-    elif tipo_label == "SAIDA":
-        tipo_label = "Saída"
-    periodo = _extrair_periodo_do_parquet(parquet_path)
-    sufixo = ""
-    if tipo_label and periodo:
-        sufixo = f" - {tipo_label}_{periodo}"
-    elif tipo_label:
-        sufixo = f" - {tipo_label}"
-    elif periodo:
-        sufixo = f" - {periodo}"
+    tipo_plural = _nome_tipo_plural(tipo_movimento)
+    periodo_mm_yyyy = _periodo_mm_yyyy(parquet_path)
+    nome_arquivo = f"Versão Completa Andersen_{tipo_plural}_{periodo_mm_yyyy}"
 
-    out_xlsb = pasta_destino / f"BASE_ANDERSEN{sufixo}.xlsb"
-    tmp_csv = pasta_destino / f"_tmp_andersen{sufixo}.csv"
+    out_xlsb = pasta_destino / f"{nome_arquivo}.xlsb"
+    tmp_csv = pasta_destino / f"_tmp_andersen_{tipo_plural}_{periodo_mm_yyyy}.csv"
 
     # PASSO 1: CSV com Polars (Rust nativo, ~10s)
     if progress_callback:
@@ -1582,9 +1595,8 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
         return linhas, 1
 
     if tipo == "ENTRADA":
-        excluir_cfop = ["1923", "2923", "1915", "2915", "1154", "2154", "1403", "2403", "1555", "2555"]
-
         ordem_entrada = [
+            "Índice", "Fonte", "Período",
             "ID_ORIGEM", "EMPRESA", "FILIAL", "Divisão", "UF", "DTEMIS", "DTENTR",
             "INFEM_NUM", "CFOP_COD", "VAL_ICMS", "Mapeamento", "TRIBICM", "IND_CANC",
             "VALSUBST_ICMS", "IND_TRIB_SUBSTRIB", "VAL_IPI", "TRIBIPI", "VAL_CONT",
@@ -1600,6 +1612,9 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
         ]
 
         mapa_entrada = {
+            "Índice": "Índice",
+            "Fonte": "Fonte",
+            "Período": "Período",
             "ID_ORIGEM": "ID Origem",
             "EMPRESA": "Empresa",
             "FILIAL": "Filial",
@@ -1670,30 +1685,13 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
         }
 
         def processar_batch_entrada(df):
-            df = normalizar_colunas_filtro(df, ["CFOP_COD", "IND_CANC", "TRIBICMS", "TRIBICM"])
-            col_trib = "TRIBICMS" if "TRIBICMS" in df.columns else ("TRIBICM" if "TRIBICM" in df.columns else None)
-
-            filtros = []
-            if col_trib is not None:
-                filtros.append(pl.col(col_trib) == "S")
-            if "IND_CANC" in df.columns:
-                filtros.append(pl.col("IND_CANC") == "N")
-            if "CFOP_COD" in df.columns:
-                filtros.append(~pl.col("CFOP_COD").is_in(excluir_cfop))
-
-            if filtros:
-                expr = filtros[0]
-                for f in filtros[1:]:
-                    expr = expr & f
-                df = df.filter(expr)
-
+            # Sem filtros — exporta TODAS as linhas. Apenas reduz para as colunas
+            # mapeadas e renomeia para os labels finais.
             df = selecionar_colunas_existentes(df, ordem_entrada)
             df = renomear_colunas_parcial(df, mapa_entrada)
             return df
 
-        periodo = _extrair_periodo_do_parquet(parquet_path)
-        sufixo_periodo = f"_{periodo}" if periodo else ""
-        nome_csv = f"BASE_VIVO_ENTRADA{sufixo_periodo}.xlsb"
+        nome_csv = f"Versão Vivo_{_nome_tipo_plural(tipo)}_{_periodo_mm_yyyy(parquet_path)}.xlsb"
         processar_batch = processar_batch_entrada
 
     elif tipo == "SAIDA":
@@ -1810,27 +1808,13 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
         }
 
         def processar_batch_saida(df):
-            df = normalizar_colunas_filtro(df, ["I_2", "IND_CANC"])
-
-            filtros = []
-            if "I_2" in df.columns:
-                filtros.append(pl.col("I_2") == "S")
-            if "IND_CANC" in df.columns:
-                filtros.append(pl.col("IND_CANC") == "N")
-
-            if filtros:
-                expr = filtros[0]
-                for f in filtros[1:]:
-                    expr = expr & f
-                df = df.filter(expr)
-
+            # Sem filtros — exporta TODAS as linhas. Apenas reduz para as colunas
+            # mapeadas e renomeia para os labels finais.
             df = selecionar_colunas_existentes(df, ordem_saida)
             df = renomear_colunas_parcial(df, mapa_saida)
             return df
 
-        periodo = _extrair_periodo_do_parquet(parquet_path)
-        sufixo_periodo = f"_{periodo}" if periodo else ""
-        nome_csv = f"BASE_VIVO_SAIDA{sufixo_periodo}.xlsb"
+        nome_csv = f"Versão Vivo_{_nome_tipo_plural(tipo)}_{_periodo_mm_yyyy(parquet_path)}.xlsb"
         processar_batch = processar_batch_saida
 
     else:
@@ -2011,8 +1995,6 @@ def processar_arquivo(args):
     df = df.with_columns([
         pl.when(pl.col("FILIAL") == "3007")
         .then(pl.lit("31SC"))
-        .when(pl.col("DivArquivo").str.to_uppercase() == "85MN")
-        .then(pl.lit("85MG"))
         .when(pl.col("DivArquivo") == "")
         .then(pl.col("Divisão_DePara").fill_null(""))
         .when(pl.col("Divisão_DePara").fill_null("").str.to_uppercase() == pl.col("DivArquivo").str.to_uppercase())

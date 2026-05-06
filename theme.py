@@ -1150,4 +1150,117 @@ def build_app_qss(font_family: str = "Segoe UI") -> str:
         font-weight: 700;
         letter-spacing: 0.3px;
     }}
+
+    /* ============================================================
+       Botões de extração (ICMS Transitórias)
+       Cores diferenciadas para WE (teal), WL (âmbar), Both (roxo Vivo)
+       ============================================================ */
+    QPushButton#ExtractBtnWE,
+    QPushButton#ExtractBtnWL,
+    QPushButton#ExtractBtnBoth {{
+        color: #FFFFFF;
+        border-radius: 9px;
+        padding: 6px 16px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        min-height: 30px;
+    }}
+
+    QPushButton#ExtractBtnWE {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #2DA9BD, stop:1 #5BC5D4
+        );
+        border: 1px solid #1F8FA0;
+    }}
+    QPushButton#ExtractBtnWE:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #248EA0, stop:1 #4BB6C5
+        );
+    }}
+
+    QPushButton#ExtractBtnWL {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #D89346, stop:1 #ECB271
+        );
+        border: 1px solid #B97732;
+    }}
+    QPushButton#ExtractBtnWL:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #C18138, stop:1 #DCA058
+        );
+    }}
+
+    QPushButton#ExtractBtnBoth {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #8C5BD0, stop:1 #B188E0
+        );
+        border: 1px solid #7142B8;
+    }}
+    QPushButton#ExtractBtnBoth:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #7C4AC2, stop:1 #A077D6
+        );
+    }}
+
+    QPushButton#ExtractBtnWE:disabled,
+    QPushButton#ExtractBtnWL:disabled,
+    QPushButton#ExtractBtnBoth:disabled,
+    QPushButton#ExtractBtnLivroEntrada:disabled,
+    QPushButton#ExtractBtnLivroSaida:disabled {{
+        background: #ECEEF2;
+        color: #B4BCC9;
+        border: 1px solid #E0E4EA;
+    }}
+
+    /* Botões de extração do Livro Fiscal — verde/azul (Entradas) e
+       vermelho/coral (Saídas), pra diferenciar do bloco WE/WL */
+    QPushButton#ExtractBtnLivroEntrada,
+    QPushButton#ExtractBtnLivroSaida {{
+        color: #FFFFFF;
+        border-radius: 9px;
+        padding: 6px 18px;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        min-height: 32px;
+    }}
+
+    QPushButton#ExtractBtnLivroEntrada {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #3C9E6E, stop:1 #62B98D
+        );
+        border: 1px solid #2D8456;
+    }}
+    QPushButton#ExtractBtnLivroEntrada:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #338961, stop:1 #54AC7E
+        );
+    }}
+
+    QPushButton#ExtractBtnLivroSaida {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #C56477, stop:1 #DA8C9A
+        );
+        border: 1px solid #A94F62;
+    }}
+    QPushButton#ExtractBtnLivroSaida:hover {{
+        background: qlineargradient(
+            x1:0, y1:0, x2:1, y2:0,
+            stop:0 #B25668, stop:1 #C97D8B
+        );
+    }}
+
+    #ExtracaoActionsRow {{
+        background: transparent;
+    }}
     """

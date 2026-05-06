@@ -89,13 +89,7 @@ def extrair_divisao(caminho_txt):
     stem = Path(caminho_txt).stem.upper()
     m = re.match(r"^(\d{2}[A-Z]{2})(?:_|$)", stem)
     if m:
-        div = m.group(1)
-        # 85MN é um alias legado que aparece em nomes de arquivo mas não
-        # existe como divisão real — o valor correto é 85MG (Minas Gerais).
-        # Mesma normalização feita em validar_logic.py e raicms_logic.py.
-        if div == "85MN":
-            return "85MG"
-        return div
+        return m.group(1)
 
     return ""
 

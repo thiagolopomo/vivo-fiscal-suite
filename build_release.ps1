@@ -121,13 +121,17 @@ pyi-makespec `
   --hidden-import "pages.p9_page" `
   --hidden-import "pages.consolidator_page" `
   --hidden-import "pages.ztmm_page" `
+  --hidden-import "pages.icms_transitorias_page" `
   --hidden-import "workers.p9_worker" `
   --hidden-import "workers.consolidator_worker" `
   --hidden-import "workers.conference_worker" `
   --hidden-import "workers.ztmm_worker" `
+  --hidden-import "workers.icms_transitorias_worker" `
   --hidden-import "ztmm_logic" `
   --hidden-import "ztmm_analise_logic" `
   --hidden-import "conferencia_logic" `
+  --hidden-import "icms_transitorias_logic" `
+  --hidden-import "pyxlsb" `
   main.py
 
 Assert-Exists ".\main.spec" "main.spec"

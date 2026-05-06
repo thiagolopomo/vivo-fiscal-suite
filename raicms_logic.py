@@ -315,10 +315,7 @@ def resolver_divisao_por_filial_e_pasta(caminho_arquivo, filial, mapa_divisao):
     divisoes = mapa_divisao.get(filial_norm, [])
 
     def normalizar_divisao_final(div):
-        div = (div or "").strip().upper()
-        if div == "85MN":
-            return "85MG"
-        return div
+        return (div or "").strip().upper()
 
     if not divisoes:
         pasta_nome = os.path.basename(os.path.dirname(caminho_arquivo)).strip().upper()
