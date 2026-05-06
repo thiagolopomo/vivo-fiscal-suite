@@ -1,7 +1,7 @@
 {
-  "version": "2.2.2",
+  "version": "2.3.0",
   "mandatory": true,
-  "notes": "fix CRITICO: consolidacao fiscal perdia VAL_ICMS em ~0,3% das linhas (pipes extras do SAP iam pro DSC e shiftavam VAL_ICMS pra 0) | perf: consolidacao Livro de Entrada 45% mais rapida | 85MN -> 85MG normalizado tambem no ZTMM",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.2.2/package.zip",
-  "sha256": "daeed18bdeb37a3f7ac43c3329ed0a157a8f34614da1a62d61c207898b36e4df"
+  "notes": "Nova aba ICMS Transitorias: consolidacao de razoes SAP, validacao contra balancete, extracao Razoes Conciliados (WE/WL via Chave_02) e extracao Transitorias do Livro Fiscal (Entradas/Saidas com filtro de CFOPs). Datas e valores em formato BR. Cache em parquet. Reversao 85MN (85MN e o valor correto, nao alias).",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.3.0/package.zip",
+  "sha256": "eba55ec04ba6e1e36bb6994bc91545a22bbc0332789f70a69668bcf278bdba0a"
 }
