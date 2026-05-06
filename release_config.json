@@ -1,6 +1,6 @@
 {
-    "version":  "2.3.0",
-    "notes":  "Nova aba ICMS Transitorias: consolidacao de razoes SAP, validacao contra balancete, extracao Razoes Conciliados (WE/WL via Chave_02) e extracao Transitorias do Livro Fiscal (Entradas/Saidas com filtro de CFOPs). Datas e valores em formato BR. Cache em parquet. Reversao 85MN (85MN e o valor correto, nao alias).",
+    "version":  "2.3.1",
+    "notes":  "ICMS Transitorias: leitura xlsb ~3-10x mais rapida (calamine + projecao de colunas + cache parquet em background); Saida com nomes originais (INFSM_*); filtro de notas canceladas (IND_CANC=S); estado de sessao por tipo de livro.",
     "mandatory":  true,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"
