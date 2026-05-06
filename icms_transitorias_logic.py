@@ -830,9 +830,10 @@ LIVRO_COL_ALIASES = {
     "id_origem":      ["ID_ORIGEM", "ID Origem"],
 }
 
-# Ordem final de saída (nomes EXATOS pedidos pelo usuário). Cada par é
-# (nome_no_output, chave_canonica_no_alias_dict). chave_canon=None ⇒ derivada.
-LIVRO_OUTPUT_COLS = [
+# Ordem final de saída (nomes EXATOS pedidos pelo usuário) — schema da
+# extração de ENTRADAS Transitórias. Cada par é (nome_no_output,
+# chave_canonica_no_alias_dict). chave_canon=None ⇒ derivada.
+LIVRO_OUTPUT_COLS_ENTRADA = [
     ("ÍNDICE",           "indice"),
     ("FONTE",            "fonte"),
     ("PERÍODO",          "periodo"),
@@ -856,9 +857,304 @@ LIVRO_OUTPUT_COLS = [
     ("Chave_01",         None),       # derivada (Divisão_INFEM_NUM)
 ]
 
+# Schema da extração de SAÍDAS Transitórias — preserva os nomes ORIGINAIS
+# do livro de saída (INFSM_*, MNFSM_*) sem renomear. Pega a mesma fonte de
+# dados via aliases, mas o output mantém o vocabulário do livro.
+# Sem DTENTR (não existe em saída — operação não tem entrada de mercadoria)
+# e sem IND_MOV (só Entrada tem).
+LIVRO_OUTPUT_COLS_SAIDA = [
+    ("ÍNDICE",                "indice"),
+    ("FONTE",                 "fonte"),
+    ("PERÍODO",               "periodo"),
+    ("CHAVE DA NOTA AA",      None),       # derivada
+    ("EMPRESA",               "empresa"),
+    ("DIVISÃO",               "divisao"),
+    ("CNPJ/CPF",              "cnpj_cpf"),
+    ("UF",                    "uf"),
+    ("IND_CANC",              "ind_canc"),
+    ("INFSM_NUM",             "infem_num"),    # nome original do livro de Saída
+    ("INFSM_DTEM",            "dtemis"),       # nome original do livro de Saída
+    ("CFOP_COD",              "cfop_cod"),
+    ("INFSM_VAL_IPI",         "val_ipi"),
+    ("INFSM_VAL_ICMS",        "val_icms"),
+    ("INFSM_VALSUBST_ICMS",   "val_subst_icms"),
+    ("MATE_COD",              "material"),
+    ("INFSM_DSC",             "dsc"),
+    ("ID_ORIGEM",             "id_origem"),
+    ("Chave_01",              None),       # derivada (Divisão_INFSM_NUM)
+]
+
+# Compat: nome antigo (qualquer código externo que ainda use)
+LIVRO_OUTPUT_COLS = LIVRO_OUTPUT_COLS_ENTRADA
+
+
+_LIVRO_MARKERS = {
+    "CFOP", "INFEM_NUM", "INFSM_NUM", "NOTA FISCAL", "CFOP_COD",
+    "DIVISÃO", "DIVISAO", "EMPRESA", "DTEMIS", "DTENTR",
+    "VAL_ICMS", "INFSM_VAL_ICMS", "VALOR DO ICMS", "CHAVE DA NOTA",
+    "CHAVE NOTA FISCAL", "ID ORIGEM", "ID_ORIGEM",
+}
+
+
+def _score_linha_header(valores):
+    """Pontua uma linha pela quantidade de marker columns que aparecem.
+    Aceita lista de strings (ou converte do que vier)."""
+    cols_upper = []
+    for v in valores:
+        s = str(v).strip().upper() if v is not None else ""
+        if s and not s.startswith("UNNAMED"):
+            cols_upper.append(s)
+    score = sum(1 for m in _LIVRO_MARKERS if any(m in c for c in cols_upper))
+    return score, len(cols_upper)
+
+
+def detectar_tipo_livro(caminho):
+    """Detecta se o livro fiscal é de Entrada ou Saída.
+
+    Estratégia em duas camadas:
+      1. Nome do arquivo (instantâneo — a maioria dos exports do app
+         ("Versão Vivo_Entradas_*", "Versão Completa Andersen_Saídas_*")
+         já carrega o tipo no nome).
+      2. Peek nas colunas (fallback) — Saída tem prefixo INFSM_ /
+         MNFSM_CHV_NFE; Entrada tem DTENTR / INFEM_NUM.
+
+    Retorna 'ENTRADA', 'SAIDA' ou None se inconclusivo.
+    """
+    caminho = Path(caminho)
+
+    # --- Camada 1: nome do arquivo ---
+    nome = caminho.stem.lower()
+    nome_norm = (
+        nome.replace("í", "i").replace("ã", "a")
+            .replace("á", "a").replace("é", "e").replace("ó", "o")
+    )
+    if "saida" in nome_norm:
+        return "SAIDA"
+    if "entrada" in nome_norm:
+        return "ENTRADA"
+
+    # --- Camada 2: peek nas colunas ---
+    suf = caminho.suffix.lower()
+    cols = []
+    try:
+        if suf == ".parquet":
+            cols = list(pl.scan_parquet(str(caminho)).collect_schema().names())
+        elif suf in (".xlsb", ".xlsx", ".xlsm"):
+            import pandas as pd
+            engine = "calamine" if suf == ".xlsb" else None
+            try:
+                sheet, header_row = _achar_sheet_e_header(caminho, engine=engine)
+                head = pd.read_excel(
+                    caminho, engine=engine, sheet_name=sheet,
+                    header=header_row, nrows=2, dtype=object,
+                )
+            except Exception:
+                fallback = "pyxlsb" if suf == ".xlsb" else None
+                sheet, header_row = _achar_sheet_e_header(caminho, engine=fallback)
+                head = pd.read_excel(
+                    caminho, engine=fallback, sheet_name=sheet,
+                    header=header_row, nrows=2, dtype=object,
+                )
+            cols = list(head.columns)
+        elif suf == ".csv":
+            sep = _detectar_separador_csv(caminho)
+            df = pl.read_csv(
+                str(caminho), n_rows=1, separator=sep,
+                infer_schema_length=0, has_header=True,
+                encoding="utf8-lossy", ignore_errors=True,
+            )
+            cols = df.columns
+    except Exception:
+        return None
+
+    cols_upper = [str(c).upper() for c in cols]
+
+    # Markers fortes de SAÍDA: prefixo INFSM_ (vivo de saída),
+    # MNFSM_CHV_NFE (chave de NFe de saída), nomes Vivo renomeados.
+    saida_markers = ("INFSM_", "MNFSM_CHV_NFE", "VR. DE ICMS", "VR. DO IPI", "DATA EMISSÃO")
+    # Markers fortes de ENTRADA: DTENTR (data de entrada), INFEM_NUM (Nota
+    # Fiscal de entrada), nomes Vivo renomeados.
+    entrada_markers = ("DTENTR", "INFEM_NUM", "VALOR DO ICMS", " ENTRADA")
+
+    n_saida = sum(1 for c in cols_upper if any(m in c for m in saida_markers))
+    n_entrada = sum(1 for c in cols_upper if any(m in c for m in entrada_markers))
+
+    if n_saida > n_entrada:
+        return "SAIDA"
+    if n_entrada > n_saida:
+        return "ENTRADA"
+    return None
+
+
+def _achar_sheet_e_header(caminho, engine, max_rows_scan=15):
+    """Identifica (sheet_name, header_row_index) da planilha de dados do
+    livro fiscal. Resolve dois problemas comuns:
+
+      1. Workbook tem múltiplas sheets (uma de pivot/resumo + a de dados).
+      2. A sheet de dados pode ter linhas vazias antes do header (header
+         começa na linha 1 ou 2 em vez da 0).
+
+    Estratégia: varre cada sheet, lê as primeiras N linhas SEM cabeçalho,
+    e pontua cada linha pelo número de colunas-marca presentes (CFOP,
+    EMPRESA, INFEM_NUM, etc.). A linha com maior score vira o header da
+    sheet vencedora.
+
+    Devolve (sheet_name, header_row_idx). Em último caso, (sheet[0], 0).
+    """
+    import pandas as pd
+
+    try:
+        xls = pd.ExcelFile(caminho, engine=engine)
+    except Exception:
+        return 0, 0
+
+    melhor = (xls.sheet_names[0], 0, -1, 0)  # (sheet, header_row, score, n_cols)
+    for s in xls.sheet_names:
+        try:
+            head = pd.read_excel(
+                xls, sheet_name=s, header=None,
+                nrows=max_rows_scan, dtype=object,
+            ).fillna("")
+        except Exception:
+            continue
+        for r in range(min(max_rows_scan, len(head))):
+            valores = head.iloc[r].tolist()
+            score, n_cols = _score_linha_header(valores)
+            if (score, n_cols) > (melhor[2], melhor[3]):
+                melhor = (s, r, score, n_cols)
+
+    return melhor[0], melhor[1]
+
+
+def _ler_xlsx_calamine_resiliente(caminho, sheet, header_row, cols_pedidas, max_tentativas=10):
+    """Tenta `pl.read_excel(columns=cols_pedidas)`. Se polars/calamine
+    reclamar de coluna ausente (ex.: "column with name 'X' not found"),
+    remove ela da lista e tenta de novo. Retorna o DataFrame ou None se
+    não conseguiu após N tentativas.
+
+    Isso protege a projeção contra pequenas variações entre arquivos
+    (ex.: IND_MOV existe no Entrada mas não no Saída) — em vez de cair
+    pra leitura completa, faz o ajuste fino e mantém o ganho de memória.
+    """
+    import re
+
+    cols = list(cols_pedidas)
+    for _ in range(max_tentativas):
+        try:
+            return pl.read_excel(
+                caminho,
+                sheet_name=sheet,
+                engine="calamine",
+                read_options={"header_row": header_row},
+                columns=cols,
+                infer_schema_length=0,
+            )
+        except Exception as e:
+            msg = str(e)
+            # polars/calamine: 'column with name "X" not found'
+            m = re.search(r'column with name "([^"]+)" not found', msg)
+            if m and m.group(1) in cols:
+                cols.remove(m.group(1))
+                if cols:
+                    continue
+            return None
+    return None
+
+
+def _ler_livro_xlsb_calamine_direto(caminho):
+    """Lê xlsb/xlsx via python_calamine e projeta APENAS as colunas que
+    a aba ICMS Transitórias usa (LIVRO_COL_ALIASES).
+
+    Por que: `pl.read_excel` aloca em Arrow todas as 146 colunas mesmo
+    quando só vamos usar 20 — isso custa ~19s extra. Indo via calamine
+    direto, lemos as 146 colunas como list[list] em Python (~8-15s) e
+    montamos o polars DataFrame só com as colunas necessárias.
+
+    Se a detecção de aliases não conseguir mapear nada (formato muito
+    diferente), retorna o livro completo — chamador pode fazer fallback.
+    """
+    from python_calamine import CalamineWorkbook
+
+    caminho = Path(caminho)
+    wb = CalamineWorkbook.from_path(str(caminho))
+
+    # Escolhe a sheet pra ler — usa só METADADOS (instantâneo), sem peek de
+    # dados (que custaria ~12s por sheet). Ordem de prioridade:
+    #   1) "Dados" se existir (convenção dos exports)
+    #   2) Sheet com maior total_height (sheets de pivot/resumo são pequenas)
+    melhor_sheet = None
+    for s in wb.sheet_names:
+        if s.strip().lower() == "dados":
+            melhor_sheet = s
+            break
+    if melhor_sheet is None:
+        melhor_sheet = max(
+            wb.sheet_names,
+            key=lambda s: wb.get_sheet_by_name(s).total_height,
+        )
+
+    sheet = wb.get_sheet_by_name(melhor_sheet)
+    all_rows = sheet.to_python()
+
+    # Encontra a linha do header dentro da sheet
+    header_idx = 0
+    for i, row in enumerate(all_rows[:15]):
+        cells = [str(c).strip() if c is not None else "" for c in row]
+        score = sum(
+            1 for m in _LIVRO_MARKERS
+            if any(m in c.upper() for c in cells if c)
+        )
+        if score >= 3:
+            header_idx = i
+            break
+
+    header = [
+        str(c).strip() if c is not None and str(c).strip() else f"_C{i}_"
+        for i, c in enumerate(all_rows[header_idx])
+    ]
+    data_rows = all_rows[header_idx + 1:]
+
+    # Resolve aliases — quais colunas reais correspondem ao que precisamos
+    resolvido = _resolver_aliases(header, LIVRO_COL_ALIASES)
+    indices_uteis = {
+        real: header.index(real)
+        for _, real in resolvido.items()
+        if real and real in header
+    }
+
+    # Helper pra converter cada célula em string preservando inteiros
+    def _to_str(v):
+        if v is None:
+            return ""
+        if isinstance(v, float) and v.is_integer():
+            return str(int(v))
+        return str(v)
+
+    if indices_uteis:
+        # Modo otimizado: monta polars só com as colunas necessárias
+        out = {
+            nome: [_to_str(r[idx]) for r in data_rows]
+            for nome, idx in indices_uteis.items()
+        }
+    else:
+        # Fallback: trouxe todas (quando o arquivo não casa com os aliases
+        # conhecidos — formato exótico)
+        out = {
+            h: [_to_str(r[i]) for r in data_rows]
+            for i, h in enumerate(header)
+        }
+
+    df = pl.from_dict(out)
+    return df.with_columns([pl.col(c).cast(pl.Utf8) for c in df.columns])
+
 
 def _ler_livro_fiscal(caminho):
     """Carrega o livro fiscal de qualquer formato (parquet/xlsb/xlsx/csv).
+
+    Para xlsb/xlsx com múltiplas sheets, escolhe automaticamente a planilha
+    que contém os dados reais (com base nas colunas-marca como CFOP_COD,
+    INFEM_NUM, Divisão, etc.). Isso evita ler por engano uma planilha de
+    pivot/resumo que tenha sido salva antes da planilha de dados.
 
     Tudo é convertido para Utf8 pra preservar zeros à esquerda, vírgulas
     decimais e formato BR. A primeira linha é o cabeçalho.
@@ -870,26 +1166,62 @@ def _ler_livro_fiscal(caminho):
         df = pl.read_parquet(str(caminho))
         return df.with_columns([pl.col(c).cast(pl.Utf8) for c in df.columns])
 
-    if suf == ".xlsb":
-        import pandas as pd
-        df_pd = pd.read_excel(caminho, engine="pyxlsb", sheet_name=0,
-                              dtype=object).fillna("")
+    if suf in (".xlsb", ".xlsx", ".xlsm"):
+        # pl.read_excel com calamine (Rust). A grande otimização aqui é a
+        # PROJEÇÃO de colunas hardcoded por tipo de arquivo (Andersen/Vivo
+        # × Entrada/Saída). Em vez de carregar 116-146 colunas em Arrow
+        # (~7-8 GB pra Saídas com 1M linhas → OOM), só pedimos as ~20 que
+        # a aba Transitórias usa (~1.5 GB). Não há peek caro: a lista vem
+        # do filename. Se uma das colunas listadas não existir no arquivo,
+        # o fallback resiliente abaixo remove e tenta de novo.
+        sheet, header_row = _achar_sheet_e_header(
+            caminho, engine="calamine" if suf == ".xlsb" else None
+        )
+        cols_projetar = _cols_projecao_pra_arquivo(caminho)
 
-        def _to_str(v):
-            if v is None or v == "":
-                return ""
-            if isinstance(v, float) and v.is_integer():
-                return str(int(v))
-            return str(v)
+        # 1ª tentativa: projetada (low memory) — com auto-correção
+        # de colunas ausentes
+        if cols_projetar:
+            df = _ler_xlsx_calamine_resiliente(
+                caminho, sheet, header_row, list(cols_projetar)
+            )
+            if df is not None:
+                return df.with_columns(
+                    [pl.col(c).cast(pl.Utf8).fill_null("") for c in df.columns]
+                )
 
-        for c in df_pd.columns:
-            df_pd[c] = df_pd[c].map(_to_str)
-        return pl.from_pandas(df_pd)
+        # 2ª tentativa: leitura completa (mais memória mas mais flexível)
+        try:
+            df = pl.read_excel(
+                caminho,
+                sheet_name=sheet,
+                engine="calamine",
+                read_options={"header_row": header_row},
+                infer_schema_length=0,
+            )
+            return df.with_columns(
+                [pl.col(c).cast(pl.Utf8).fill_null("") for c in df.columns]
+            )
+        except Exception:
+            # 3ª tentativa: pandas + pyxlsb (xlsb) ou openpyxl (xlsx)
+            import pandas as pd
+            fallback = "pyxlsb" if suf == ".xlsb" else None
+            sheet, header_row = _achar_sheet_e_header(caminho, engine=fallback)
+            df_pd = pd.read_excel(
+                caminho, engine=fallback, sheet_name=sheet,
+                header=header_row, dtype=object,
+            ).fillna("")
 
-    if suf in (".xlsx", ".xlsm"):
-        import pandas as pd
-        df_pd = pd.read_excel(caminho, sheet_name=0, dtype=str).fillna("")
-        return pl.from_pandas(df_pd)
+            def _to_str(v):
+                if v is None or v == "":
+                    return ""
+                if isinstance(v, float) and v.is_integer():
+                    return str(int(v))
+                return str(v)
+
+            for c in df_pd.columns:
+                df_pd[c] = df_pd[c].map(_to_str)
+            return pl.from_pandas(df_pd)
 
     if suf == ".csv":
         sep = _detectar_separador_csv(caminho)
@@ -956,32 +1288,48 @@ def _ler_livro_fiscal_com_cache(caminho):
 # ---------- Coerções pro output do livro (datas e números BR) ------------
 
 def _coerce_para_data_br(col_name):
-    """Converte para 'dd/mm/yyyy' se o valor parece ser um serial Excel
-    (apenas dígitos, opcionalmente com decimal). Caso contrário (já é uma
-    data textual ou string vazia), preserva o valor original.
+    """Converte uma coluna de data para o formato BR 'dd/mm/yyyy'.
 
-    Quando o pyxlsb lê uma célula formatada como Data num xlsb, devolve o
-    serial Excel (ex.: 46095 = 06/03/2026). Sem essa conversão, o output
-    sairia com '46095' como texto e o usuário teria que formatar manualmente
-    no Excel.
+    Aceita os formatos comuns que aparecem na nossa pipeline:
+      - Serial Excel (46095) — quando o reader devolveu o número bruto
+      - ISO datetime ('2026-03-01 00:00:00') — formato do calamine
+      - ISO date ('2026-03-01')
+      - BR date ('06/03/2026') — preservado intacto
+      - Qualquer outra coisa: preserva o valor original (sem quebrar)
     """
     from datetime import date
 
     raw = pl.col(col_name).cast(pl.Utf8).fill_null("").str.strip_chars()
-    # Serial Excel: só dígitos (com decimal opcional), nada de barra ou hífen
-    is_serial = raw.str.contains(r"^\d+(\.\d+)?$", literal=False)
+
+    # 1) Já é BR ('06/03/2026') — primeira coisa que checamos pra preservar
+    eh_br = raw.str.contains(r"^\d{2}/\d{2}/\d{4}", literal=False)
+
+    # 2) ISO datetime ou date ('2026-03-01' ou '2026-03-01 00:00:00')
+    eh_iso = raw.str.contains(r"^\d{4}-\d{2}-\d{2}", literal=False)
+    iso_para_br = (
+        raw.str.slice(8, 2)              # dia
+        + pl.lit("/")
+        + raw.str.slice(5, 2)            # mês
+        + pl.lit("/")
+        + raw.str.slice(0, 4)            # ano
+    )
+
+    # 3) Serial Excel (somente dígitos, opcionalmente com decimal)
+    eh_serial = raw.str.contains(r"^\d+(\.\d+)?$", literal=False)
     serial_int = (
         raw.str.replace(r"\..*$", "", literal=False)
            .cast(pl.Int64, strict=False)
     )
     epoch = pl.lit(date(1899, 12, 30))  # Excel epoch (leap-year bug compatível)
-    convertida = (
+    serial_para_br = (
         (epoch + pl.duration(days=serial_int)).dt.strftime("%d/%m/%Y")
     )
+
     return (
-        pl.when(is_serial & (raw != ""))
-        .then(convertida)
-        .otherwise(raw)
+        pl.when(eh_br).then(raw)
+          .when(eh_iso).then(iso_para_br)
+          .when(eh_serial & (raw != "")).then(serial_para_br)
+          .otherwise(raw)
     )
 
 
@@ -999,8 +1347,79 @@ def _coerce_para_num_br(col_name):
 
 
 # Quais colunas do output devem ser tratadas como Data ou Número BR.
-LIVRO_DATE_COLS = ["DTEMISS", "DTENTR"]
-LIVRO_NUM_COLS = ["VAL_IPI", "VAL_ICMS", "VAL_SUBST_ICMS"]
+# Inclui os nomes tanto do schema de Entrada quanto do schema de Saída;
+# o coercion check existe-coluna antes de aplicar, então é seguro listar tudo.
+LIVRO_DATE_COLS = ["DTEMISS", "DTENTR", "INFSM_DTEM"]
+LIVRO_NUM_COLS = [
+    "VAL_IPI", "VAL_ICMS", "VAL_SUBST_ICMS",
+    "INFSM_VAL_IPI", "INFSM_VAL_ICMS", "INFSM_VALSUBST_ICMS",
+]
+
+
+# Colunas que ICMS Transitórias precisa, por (origem, tipo). Servem pra
+# PROJETAR a leitura — em vez de carregar 116-146 colunas, pl.read_excel
+# aloca só as ~20 listadas. Isso reduz uso de memória de ~8GB pra ~1.5GB
+# em arquivos grandes (Saídas com 1M linhas), evitando crash por OOM.
+LIVRO_COLS_PROJECAO = {
+    ("ANDERSEN", "ENTRADA"): [
+        "Índice", "Fonte", "Período", "CHAVE DA NOTA", "EMPRESA", "Divisão",
+        "CNPJ/CPF", "UF", "IND_CANC", "INFEM_NUM", "DTEMIS", "DTENTR",
+        "CFOP_COD", "VAL_IPI", "VAL_ICMS", "VALSUBST_ICMS", "MATE_COD",
+        "DSC", "IND_MOV", "ID_ORIGEM",
+    ],
+    ("ANDERSEN", "SAIDA"): [
+        "Índice", "Fonte", "Período", "MNFSM_CHV_NFE", "EMPRESA", "Divisão",
+        "CNPJ/CPF", "UF", "IND_CANC", "INFSM_NUM", "INFSM_DTEM",
+        "CFOP_COD", "INFSM_VAL_IPI", "INFSM_VAL_ICMS", "INFSM_VALSUBST_ICMS",
+        "MATE_COD", "INFSM_DSC", "ID_ORIGEM",
+        # IND_MOV não existe no Saída — só no Entrada
+    ],
+    ("VIVO", "ENTRADA"): [
+        "Índice", "Fonte", "Período", "Chave Nota Fiscal", "Empresa", "Divisão",
+        "CNPJ/CPF", "Unidade Federativa", "Indicador de Cancelamento",
+        "Nota Fiscal", "Emissão", "Entrada", "CFOP",
+        "Valor do IPI", "Valor do ICMS", "Valor Subst. ICMS",
+        "Material", "Descrição Complementar", "Indicador de Movimento", "ID Origem",
+    ],
+    ("VIVO", "SAIDA"): [
+        "Índice", "Fonte", "Período", "Chave de Acesso", "Empresa", "Divisão",
+        "CNPJ/CPF", "UF", "Indicador de Cancelamento",
+        "Nota Fiscal", "Data Emissão", "CFOP",
+        "Vr. do IPI", "Vr. de ICMS", "Vr. do ICMS por Substituto",
+        "Material", "Descrição", "Indicador de Movimento", "ID Origem",
+    ],
+}
+
+
+def _detectar_formato_livro(caminho):
+    """Detecta (origem, tipo) baseado no filename. Retorna tupla com strings
+    'ANDERSEN' / 'VIVO' / None pra origem e 'ENTRADA' / 'SAIDA' / None pra tipo."""
+    nome = Path(caminho).stem.lower()
+    nome_norm = (
+        nome.replace("í", "i").replace("ã", "a").replace("á", "a")
+            .replace("é", "e").replace("ê", "e").replace("ó", "o").replace("ô", "o")
+    )
+    origem = None
+    if "andersen" in nome_norm:
+        origem = "ANDERSEN"
+    elif "vivo" in nome_norm:
+        origem = "VIVO"
+    tipo = None
+    if "saida" in nome_norm:
+        tipo = "SAIDA"
+    elif "entrada" in nome_norm:
+        tipo = "ENTRADA"
+    return origem, tipo
+
+
+def _cols_projecao_pra_arquivo(caminho):
+    """Retorna a lista de colunas a projetar (~20) baseado no tipo do arquivo.
+    None se o tipo não bater com nenhum padrão conhecido — chamador faz
+    leitura completa nesse caso."""
+    origem, tipo = _detectar_formato_livro(caminho)
+    if not origem or not tipo:
+        return None
+    return LIVRO_COLS_PROJECAO.get((origem, tipo))
 
 
 def _resolver_aliases(cols_arquivo, alias_dict):
@@ -1091,9 +1510,21 @@ def extrair_transitorias_livro(
     )
     df = df.filter(pl.col(col_cfop).is_in(cfops_alvo))
 
+    # Exclui notas canceladas (IND_CANC = "S"). Mantém só "N" (normal) ou
+    # ausente. Aplicado em qualquer tipo (Entrada e Saída) — convenção
+    # fiscal padrão é não considerar notas canceladas.
+    col_canc = resolvido.get("ind_canc")
+    if col_canc:
+        df = df.with_columns(
+            pl.col(col_canc).cast(pl.Utf8).fill_null("")
+              .str.strip_chars().str.to_uppercase().alias(col_canc)
+        )
+        df = df.filter(pl.col(col_canc) != "S")
+
     if df.height == 0:
         raise ValueError(
-            f"Nenhum CFOP transitório de {rotulo_tipo} encontrado no livro importado.\n"
+            f"Nenhum CFOP transitório de {rotulo_tipo} encontrado no livro "
+            f"importado (após filtro de notas canceladas).\n"
             f"CFOPs procurados: {', '.join(cfops_alvo)}"
         )
 
@@ -1121,8 +1552,16 @@ def extrair_transitorias_livro(
     if progress_callback:
         progress_callback("livro", 4, 5, "Selecionando colunas finais...")
 
+    # Pra Saída usamos o schema que preserva os nomes ORIGINAIS do livro
+    # (INFSM_NUM, INFSM_DTEM, INFSM_VAL_ICMS, etc) em vez de renomear pra
+    # versão Entrada. Pra Entrada continua o schema original do usuário.
+    output_cols = (
+        LIVRO_OUTPUT_COLS_SAIDA if tipo == "SAIDA"
+        else LIVRO_OUTPUT_COLS_ENTRADA
+    )
+
     select_exprs = []
-    for nome_final, chave_canon in LIVRO_OUTPUT_COLS:
+    for nome_final, chave_canon in output_cols:
         if chave_canon is None:
             # Coluna derivada (CHAVE DA NOTA AA, Chave_01) — já existe no df.
             if nome_final in df.columns:

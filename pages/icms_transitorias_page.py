@@ -24,8 +24,11 @@ from workers.icms_transitorias_worker import (
     TransitValidacaoWorker,
     TransitExtracaoAAWorker,
     TransitLivroExtractWorker,
+    TransitLivroPreloadWorker,
 )
-from icms_transitorias_logic import carregar_meta_transitorias, CACHE_TRANSIT_VALID
+from icms_transitorias_logic import (
+    carregar_meta_transitorias, CACHE_TRANSIT_VALID, detectar_tipo_livro,
+)
 from pages.p9_page import MetricBox, HoverCard, ResponsiveGrid
 from log_service import get_machine_id
 
@@ -512,6 +515,10 @@ class IcmsTransitoriasPage(QWidget):
         # nesta abertura do app. Assim a UI não habilita os botões de
         # extração WE/WL com base num cache antigo da máquina.
         self._consolidado_nesta_sessao = False
+        # Caminhos do livro fiscal por tipo importado NESTA sessão. Cada
+        # botão de extração só habilita quando o tipo correspondente já foi
+        # carregado pelo menos uma vez. Tudo zera ao fechar o app.
+        self._livro_paths_sessao = {"ENTRADA": None, "SAIDA": None}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -775,11 +782,108 @@ class IcmsTransitoriasPage(QWidget):
         self.tab_cons.btn_extrair_both.setEnabled(extract_ok)
 
     def _on_livro_path_changed(self, txt):
-        """Habilita os botões de Transitórias do Livro só quando o caminho
-        aponta pra um arquivo existente."""
-        valido = bool(txt and Path(txt.strip()).is_file())
-        self.tab_cons.btn_livro_entradas.setEnabled(valido)
-        self.tab_cons.btn_livro_saidas.setEnabled(valido)
+        """Quando o usuário seleciona um livro fiscal, dispara um worker em
+        BACKGROUND que:
+
+          1. Detecta o tipo (ENTRADA ou SAIDA) pelo nome/headers.
+          2. Pré-converte o livro pra parquet em cache (transferindo o custo
+             do xlsb-lento pra esse momento — extração depois fica instantânea).
+          3. Habilita SOMENTE o botão correspondente ao tipo detectado.
+
+        Estado por sessão: zera ao fechar o app.
+        """
+        path = (txt or "").strip()
+        if not path or not Path(path).is_file():
+            self._refresh_livro_buttons()
+            return
+
+        # Evita preload duplicado se o mesmo arquivo já foi processado nesta
+        # sessão (via path-em-uso pelo livro_paths_sessao).
+        ja_processado = path in (
+            self._livro_paths_sessao.get("ENTRADA"),
+            self._livro_paths_sessao.get("SAIDA"),
+        )
+        if ja_processado:
+            self._refresh_livro_buttons()
+            return
+
+        # Trava temporariamente os 2 botões e dispara o worker.
+        self.tab_cons.btn_livro_entradas.setEnabled(False)
+        self.tab_cons.btn_livro_saidas.setEnabled(False)
+        self.status_texto.setText("Preparando livro fiscal...")
+        self.saida.append(f"[livro] Preparando: {Path(path).name}")
+        self.progress.setValue(0)
+
+        self.preload_worker = TransitLivroPreloadWorker(
+            path, machine_id=get_machine_id(),
+        )
+        self.preload_worker.progresso.connect(self.atualizar)
+        self.preload_worker.sucesso.connect(self._livro_preload_sucesso)
+        self.preload_worker.erro.connect(self._livro_preload_erro)
+        self.preload_worker.start()
+
+    def _livro_preload_sucesso(self, resultado):
+        """Worker terminou: parquet em cache, tipo detectado. Salva o caminho
+        no slot do tipo correspondente e habilita o botão certo."""
+        tipo = resultado.get("tipo")
+        caminho = resultado.get("caminho")
+
+        if tipo in ("ENTRADA", "SAIDA"):
+            self._livro_paths_sessao[tipo] = caminho
+            rotulo = "Entrada" if tipo == "ENTRADA" else "Saída"
+            self.atualizar(
+                "finalizado", 1, 1,
+                f"Livro de {rotulo} pronto ({resultado['linhas']:,} linhas)"
+            )
+        else:
+            # Tipo não detectado — não habilita nada, avisa o usuário
+            self.atualizar(
+                "atenção", 1, 1,
+                "Não consegui identificar se é Entrada ou Saída — verifique o arquivo."
+            )
+            QMessageBox.warning(
+                self, "Tipo não identificado",
+                "Não foi possível detectar se este livro é de Entrada ou Saída "
+                "automaticamente.\n\nO arquivo foi lido com sucesso, mas você "
+                "precisa garantir que o nome ou as colunas indiquem o tipo "
+                "(ex.: nome contendo 'Entradas' ou colunas DTENTR/INFEM_NUM)."
+            )
+
+        self._refresh_livro_buttons()
+
+    def _livro_preload_erro(self, erro):
+        self.status_texto.setText("Falha ao ler livro fiscal.")
+        self._refresh_livro_buttons()
+        QMessageBox.critical(
+            self, "Erro ao ler livro fiscal", f"Falha:\n{erro}"
+        )
+
+    def _refresh_livro_buttons(self):
+        """Atualiza enabled/disabled e tooltip dos 2 botões de extração de
+        Transitórias do Livro com base nos caminhos de sessão."""
+        path_e = self._livro_paths_sessao.get("ENTRADA")
+        path_s = self._livro_paths_sessao.get("SAIDA")
+
+        self.tab_cons.btn_livro_entradas.setEnabled(bool(path_e))
+        self.tab_cons.btn_livro_saidas.setEnabled(bool(path_s))
+
+        if path_e:
+            self.tab_cons.btn_livro_entradas.setToolTip(
+                f"Usará o livro: {Path(path_e).name}"
+            )
+        else:
+            self.tab_cons.btn_livro_entradas.setToolTip(
+                "Importe um livro fiscal de Entrada para habilitar."
+            )
+
+        if path_s:
+            self.tab_cons.btn_livro_saidas.setToolTip(
+                f"Usará o livro: {Path(path_s).name}"
+            )
+        else:
+            self.tab_cons.btn_livro_saidas.setToolTip(
+                "Importe um livro fiscal de Saída para habilitar."
+            )
 
     # ---- Helpers ----
 
@@ -1055,12 +1159,19 @@ class IcmsTransitoriasPage(QWidget):
     # ---- Extração de Transitórias do Livro Fiscal ----
 
     def executar_livro_transit(self, tipo_movimento):
-        """tipo_movimento: 'ENTRADA' ou 'SAIDA'."""
-        livro = self.tab_cons.path_livro.input.text().strip()
+        """tipo_movimento: 'ENTRADA' ou 'SAIDA'.
+
+        Usa o caminho que foi importado para esse TIPO específico nesta
+        sessão (em vez do que está no file picker), pra preservar a
+        seleção dos dois tipos quando o usuário importa ambos em sequência.
+        """
+        livro = self._livro_paths_sessao.get(tipo_movimento)
         if not livro or not Path(livro).is_file():
             QMessageBox.critical(
                 self, "Erro",
-                "Selecione um arquivo de livro fiscal válido (xlsx, xlsb, csv ou parquet)."
+                f"Nenhum livro fiscal de {tipo_movimento.title()} foi "
+                f"importado nesta sessão. Selecione um arquivo do tipo "
+                f"correto e tente de novo."
             )
             return
 
@@ -1102,8 +1213,9 @@ class IcmsTransitoriasPage(QWidget):
 
     def _livro_transit_sucesso(self, resultado):
         self._set_buttons_enabled(True)
-        self.tab_cons.btn_livro_entradas.setEnabled(True)
-        self.tab_cons.btn_livro_saidas.setEnabled(True)
+        # Reavalia o estado dos botões com base nos paths de sessão por tipo
+        # (não habilita Saída só porque a Entrada terminou, e vice-versa).
+        self._refresh_livro_buttons()
 
         # Renomeia o arquivo final para incluir o período descoberto a partir
         # dos dados (ex: "Entrada_Transitórias_03_2026.xlsb"), respeitando a
@@ -1138,8 +1250,7 @@ class IcmsTransitoriasPage(QWidget):
 
     def _livro_transit_erro(self, erro):
         self._set_buttons_enabled(True)
-        self.tab_cons.btn_livro_entradas.setEnabled(True)
-        self.tab_cons.btn_livro_saidas.setEnabled(True)
+        self._refresh_livro_buttons()
         self.status_texto.setText("Falha na extração do livro.")
         QMessageBox.critical(self, "Erro", f"Falha:\n{erro}")
 

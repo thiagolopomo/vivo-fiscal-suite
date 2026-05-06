@@ -9,6 +9,8 @@ from icms_transitorias_logic import (
     validar_contra_balancete,
     extrair_razoes_aa,
     extrair_transitorias_livro,
+    detectar_tipo_livro,
+    _ler_livro_fiscal_com_cache,
 )
 from log_service import log_async
 
@@ -105,6 +107,74 @@ class TransitExtracaoAAWorker(QThread):
                     self.machine_id,
                     "transit_extracao_aa_erro",
                     {"erro": erro, "tipo_filtro": self.tipo_filtro},
+                )
+            self.erro.emit(erro)
+
+
+class TransitLivroPreloadWorker(QThread):
+    """Pré-converte o livro fiscal para parquet em background, ASSIM QUE
+    o usuário seleciona o arquivo no file picker. Isso transfere o custo
+    da leitura do xlsb (lento) pro momento da seleção, deixando a extração
+    de Entradas/Saídas Transitórias ~instantânea depois.
+
+    Emite o tipo detectado (ENTRADA/SAIDA/None) junto com o caminho — pra
+    UI saber qual botão habilitar.
+    """
+    progresso = Signal(str, int, int, str)
+    sucesso = Signal(dict)
+    erro = Signal(str)
+
+    def __init__(self, caminho_livro, machine_id=""):
+        super().__init__()
+        self.caminho_livro = caminho_livro
+        self.machine_id = machine_id
+
+    def callback(self, etapa, atual, total, detalhe):
+        self.progresso.emit(etapa, atual, total, detalhe)
+
+    def run(self):
+        t0 = time.time()
+        if self.machine_id:
+            log_async(self.machine_id, "transit_livro_preload_iniciado")
+        try:
+            self.callback("preload_livro", 1, 3, "Detectando tipo do livro...")
+            tipo = detectar_tipo_livro(self.caminho_livro)
+
+            self.callback(
+                "preload_livro", 2, 3,
+                "Lendo livro e gerando cache parquet (uma única vez)...",
+            )
+            df = _ler_livro_fiscal_com_cache(self.caminho_livro)
+            n_linhas = df.height
+            n_cols = len(df.columns)
+            del df  # libera RAM imediatamente — UI só precisa saber o tipo
+
+            self.callback(
+                "preload_livro", 3, 3,
+                f"Cache pronto: {n_linhas:,} linhas x {n_cols} colunas",
+            )
+
+            elapsed = round(time.time() - t0, 1)
+            if self.machine_id:
+                log_async(
+                    self.machine_id,
+                    "transit_livro_preload_concluido",
+                    {"tempo_s": elapsed, "tipo": tipo, "linhas": n_linhas},
+                )
+            self.sucesso.emit({
+                "caminho": self.caminho_livro,
+                "tipo": tipo,
+                "linhas": n_linhas,
+                "colunas": n_cols,
+                "tempo_s": elapsed,
+            })
+        except Exception as e:
+            erro = "".join(traceback.format_exception_only(type(e), e)).strip()
+            if self.machine_id:
+                log_async(
+                    self.machine_id,
+                    "transit_livro_preload_erro",
+                    {"erro": erro},
                 )
             self.erro.emit(erro)
 

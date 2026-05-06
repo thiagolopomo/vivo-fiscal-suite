@@ -132,6 +132,8 @@ pyi-makespec `
   --hidden-import "conferencia_logic" `
   --hidden-import "icms_transitorias_logic" `
   --hidden-import "pyxlsb" `
+  --hidden-import "python_calamine" `
+  --hidden-import "calamine" `
   main.py
 
 Assert-Exists ".\main.spec" "main.spec"
