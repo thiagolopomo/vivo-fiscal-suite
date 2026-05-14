@@ -505,50 +505,77 @@ def descobrir_idx_merge_seguro(header_cols):
     return None
 
 
-def corrigir_pipe_na_descricao(linha, ncols, idx_dsc):
+def _merge_extras_em(cols, idx_alvo, ncols):
+    """Mescla os pipes extras na coluna idx_alvo, mantendo o resto alinhado:
+    left = cols[:idx_alvo], middle (juntado) = cols[idx_alvo:-right_count],
+    right = cols[-right_count:]. Devolve uma lista com exatamente ncols itens."""
+    right_count = ncols - idx_alvo - 1
+    left = cols[:idx_alvo]
+    if right_count > 0:
+        right = cols[-right_count:]
+        middle = cols[idx_alvo:-right_count]
+    else:
+        right = []
+        middle = cols[idx_alvo:]
+    merged = PIPE_PLACEHOLDER.join(middle)
+    out = left + [merged] + right
+    if len(out) < ncols:
+        out.extend([""] * (ncols - len(out)))
+    elif len(out) > ncols:
+        out = out[:ncols]
+    return out
+
+
+# Regex pré-compilado: CFOP é sempre 4 dígitos (1xxx-7xxx)
+_RE_CFOP_VALIDO = re.compile(r"^\d{4}$")
+
+
+def corrigir_pipe_na_descricao(linha, ncols, idx_alvos, idx_cfop=None):
+    """Corrige uma linha que tem mais (ou menos) pipes que o header.
+
+    `idx_alvos` é uma LISTA ordenada de índices candidatos onde o merge
+    pode acontecer (ex.: [idx_dsc, idx_var05]). Tenta cada um e:
+      - se idx_cfop foi passado, valida que o resultado tem CFOP_COD
+        numérico (4 dígitos) e retorna o primeiro candidato que casar
+      - senão, devolve o resultado do primeiro candidato
+
+    Isso resolve o caso onde o pipe extra pode estar em DIFERENTES colunas
+    dependendo do arquivo (DSC no Saída, VAR05 no Entrada). Em vez de
+    chutar uma única coluna, validamos pelo CFOP — se ficou número 4-dígitos,
+    a mesclagem foi no lugar certo.
+    """
     linha = linha.rstrip("\r\n")
 
-    # Fast path: conta `|` sem fazer split. Se bater com o esperado, a linha
-    # não precisa ser modificada — devolve a string original direto.
-    # Isso pula o split+join custoso em ~99% das linhas (as correctamente
-    # formatadas), que são a grande maioria em volume.
+    # Fast path: linha bem-formada, nada a corrigir
     if linha.count("|") == ncols - 1:
         return linha
 
     cols = linha.split("|")
 
-    if idx_dsc is None:
-        if len(cols) < ncols:
-            cols.extend([""] * (ncols - len(cols)))
-        elif len(cols) > ncols:
-            cols = cols[:ncols]
-        return "|".join(cols)
-
+    # Linha curta — só pad com vazios
     if len(cols) < ncols:
         cols.extend([""] * (ncols - len(cols)))
         return "|".join(cols)
 
-    right_count = ncols - idx_dsc - 1
+    # Sem candidatos de merge — trunca pra ncols
+    if not idx_alvos:
+        return "|".join(cols[:ncols])
 
-    left = cols[:idx_dsc]
+    # Tenta cada idx candidato. Se idx_cfop válido, usa CFOP como árbitro.
+    primeira_tentativa = None
+    for idx in idx_alvos:
+        if idx is None:
+            continue
+        candidato = _merge_extras_em(cols, idx, ncols)
+        if primeira_tentativa is None:
+            primeira_tentativa = candidato
+        if idx_cfop is not None and idx_cfop < len(candidato):
+            cfop_val = (candidato[idx_cfop] or "").strip()
+            if _RE_CFOP_VALIDO.match(cfop_val):
+                return "|".join(candidato)
 
-    if right_count > 0:
-        right = cols[-right_count:]
-        middle = cols[idx_dsc:-right_count]
-    else:
-        right = []
-        middle = cols[idx_dsc:]
-
-    dsc = PIPE_PLACEHOLDER.join(middle)
-
-    cols_corrigidas = left + [dsc] + right
-
-    if len(cols_corrigidas) < ncols:
-        cols_corrigidas.extend([""] * (ncols - len(cols_corrigidas)))
-    elif len(cols_corrigidas) > ncols:
-        cols_corrigidas = cols_corrigidas[:ncols]
-
-    return "|".join(cols_corrigidas)
+    # Nenhum candidato passou na validação — usa o primeiro como fallback
+    return "|".join(primeira_tentativa or cols[:ncols])
 
 
 def extrair_divisao_arquivo(nome):
@@ -1849,9 +1876,30 @@ def criar_txt_limpo(path_txt, tmp_txt):
     idx_dsc = descobrir_idx_dsc(header)
     idx_seguro = descobrir_idx_merge_seguro(header)
 
-    # Escolhe onde absorver os `|` extras. Prioriza uma coluna tardia de
-    # free-text (VAR05 etc); só cai no DSC se nenhuma existir no header.
-    idx_merge = idx_seguro if idx_seguro is not None else idx_dsc
+    # Lista ORDENADA de candidatos a ponto de merge. corrigir_pipe_na_descricao
+    # tenta cada um e valida pelo CFOP (4 dígitos). Quando o pipe extra
+    # estiver dentro do DSC (caso comum em livros de Saída onde a descrição
+    # tem `|` literal), DSC vence. Quando estiver no VAR05 (caso típico de
+    # Entrada com audit log), VAR05 vence. Sem chute fixo.
+    candidatos_merge = []
+    if idx_dsc is not None:
+        candidatos_merge.append(idx_dsc)
+    if idx_seguro is not None and idx_seguro not in candidatos_merge:
+        candidatos_merge.append(idx_seguro)
+
+    # CFOP_COD é usado pelo corrigir_pipe_na_descricao como árbitro: se
+    # depois do merge ele ficou com 4 dígitos (CFOP válido), aquele candidato
+    # vence. Sem isso voltaríamos a chutar errado e shiftar colunas.
+    idx_cfop = None
+    for i, c in enumerate(header):
+        if c.upper() == "CFOP_COD":
+            idx_cfop = i
+            break
+
+    # Coluna onde o PIPE_PLACEHOLDER vai morar pra ser decodificado depois.
+    # Como o merge é dinâmico, marcamos como "qualquer um dos candidatos" —
+    # o processar_arquivo decodifica em TODOS eles (operação idempotente
+    # se a coluna não tiver placeholder).
     kept = 0
 
     # Buffers maiores reduzem o número de syscalls de write/read em ~100x
@@ -1875,7 +1923,9 @@ def criar_txt_limpo(path_txt, tmp_txt):
             if linha_eh_lixo(linha):
                 continue
 
-            buf_out.append(corrigir_pipe_na_descricao(linha, ncols, idx_merge) + "\n")
+            buf_out.append(
+                corrigir_pipe_na_descricao(linha, ncols, candidatos_merge, idx_cfop) + "\n"
+            )
             kept += 1
 
             if len(buf_out) >= FLUSH_EVERY:
@@ -1885,7 +1935,12 @@ def criar_txt_limpo(path_txt, tmp_txt):
         if buf_out:
             fout.writelines(buf_out)
 
-    return header, header_raw, kept, idx_merge
+    # Devolve o índice "primário" (o primeiro tentado) só pra compatibilidade
+    # com processar_arquivo, que decodifica o placeholder lá. Como a função
+    # de decodificação é uma simples substituição "<<<PIPE_DESC>>>" -> "|",
+    # ela é segura mesmo se a coluna não tiver placeholder. Mas pra cobrir
+    # AMBOS os candidatos, vamos retornar a lista.
+    return header, header_raw, kept, candidatos_merge
 
 
 def processar_arquivo(args):
@@ -1901,7 +1956,7 @@ def processar_arquivo(args):
     shard_out = tmp_dir / f"{path_txt.stem}.parquet"
     txt_limpo = tmp_dir / f"{path_txt.stem}__limpo.txt"
 
-    header, header_raw, kept, idx_merge = criar_txt_limpo(path_txt, txt_limpo)
+    header, header_raw, kept, candidatos_merge = criar_txt_limpo(path_txt, txt_limpo)
     if header is None:
         return {"arquivo": path_txt.name, "linhas": 0, "ok": False, "motivo": "header não encontrado"}
 
@@ -1917,16 +1972,19 @@ def processar_arquivo(args):
         quote_char=None,
     )
 
-    # O PIPE_PLACEHOLDER foi gravado na coluna escolhida por `criar_txt_limpo`
-    # (que pode ser DSC ou VAR05, conforme o caso). Precisamos decodificá-lo
-    # EXATAMENTE naquela coluna.
-    if idx_merge is not None:
-        col_merge = header[idx_merge]
-        df = df.with_columns(
-            pl.col(col_merge)
-            .str.replace_all(PIPE_PLACEHOLDER, "|")
-            .alias(col_merge)
-        )
+    # O PIPE_PLACEHOLDER pode ter sido gravado em QUALQUER um dos candidatos
+    # de merge (DSC, VAR05, etc) — depende do que a validação por CFOP
+    # escolheu por linha. Como a operação `replace_all(placeholder, "|")` é
+    # idempotente (não-op em colunas sem placeholder), decodificamos em
+    # TODAS as colunas candidatas pra cobrir os dois casos.
+    if candidatos_merge:
+        idxs = candidatos_merge if isinstance(candidatos_merge, list) else [candidatos_merge]
+        cols_decode = [header[i] for i in idxs if i is not None and i < len(header)]
+        if cols_decode:
+            df = df.with_columns([
+                pl.col(c).str.replace_all(PIPE_PLACEHOLDER, "|").alias(c)
+                for c in cols_decode if c in df.columns
+            ])
 
     nome_arquivo = path_txt.name
     divisao_arquivo = extrair_divisao_arquivo(nome_arquivo)
