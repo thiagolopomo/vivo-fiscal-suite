@@ -1,6 +1,6 @@
 {
-    "version":  "2.3.1",
-    "notes":  "ICMS Transitorias: leitura xlsb ~3-10x mais rapida (calamine + projecao de colunas + cache parquet em background); Saida com nomes originais (INFSM_*); filtro de notas canceladas (IND_CANC=S); estado de sessao por tipo de livro.",
+    "version":  "2.3.2",
+    "notes":  "fix CRITICO Consolidador Fiscal: shift de colunas no Saida (CFOP_COD vinha com texto tipo PEW1 quando o INFSM_DSC tinha pipe literal). Merge agora usa CFOP_COD como arbitro: tenta DSC primeiro, valida CFOP de 4 digitos; senao tenta VAR05. Cobre Entrada e Saida sem chute fixo.",
     "mandatory":  true,
     "repo_owner":  "thiagolopomo",
     "repo_name":  "vivo-fiscal-suite"
