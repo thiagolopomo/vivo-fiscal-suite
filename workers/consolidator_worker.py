@@ -34,22 +34,31 @@ class ConsolidatorProcessWorker(QThread):
             log_async(self.machine_id, "consolidador_processamento_iniciado",
                       {"base_dir": self.base_dir})
         try:
-            parquet_final, total_linhas, tempo_total, tipo_movimento = consolidar_final(
+            resultado = consolidar_final(
                 self.base_dir,
                 progress_callback=self.callback
             )
+            # Aceita ambos os formatos de retorno (com/sem cfop_alertas)
+            # pra evitar quebrar se rodar contra build mais antiga em dev.
+            if len(resultado) == 5:
+                parquet_final, total_linhas, tempo_total, tipo_movimento, cfop_alertas = resultado
+            else:
+                parquet_final, total_linhas, tempo_total, tipo_movimento = resultado
+                cfop_alertas = []
 
             elapsed = round(time.time() - t0, 1)
             if self.machine_id:
                 log_async(self.machine_id, "consolidador_processamento_concluido",
                           {"tempo_s": elapsed, "linhas": total_linhas,
-                           "tipo_movimento": tipo_movimento})
+                           "tipo_movimento": tipo_movimento,
+                           "cfop_suspeitos": sum(q for _, q in cfop_alertas)})
 
             self.sucesso.emit({
                 "parquet_final": parquet_final,
                 "total_linhas": total_linhas,
                 "tempo_total": tempo_total,
                 "tipo_movimento": tipo_movimento,
+                "cfop_alertas": cfop_alertas,
             })
 
         except Exception as e:

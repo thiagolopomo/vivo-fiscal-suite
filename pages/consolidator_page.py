@@ -432,15 +432,51 @@ class ConsolidatorPage(QWidget):
 
         self.atualizar("finalizado", 1, 1, f"Base interna pronta: {resultado['parquet_final']}")
 
-        QMessageBox.information(
-            self,
-            "Sucesso",
-            f"Base processada com sucesso.\n\n"
-            f"Tipo detectado: {resultado['tipo_movimento']}\n"
-            f"Linhas: {resultado['total_linhas']:,}\n"
-            f"Base interna: {resultado['parquet_final']}\n"
-            f"Tempo total: {resultado['tempo_total']}s"
-        )
+        # Safety net: se a consolidação detectou linhas com CFOP_COD em
+        # formato suspeito (não-4-dígitos), exibimos um alerta DESTACADO
+        # antes do "Sucesso". Isso garante que QUALQUER shift de coluna
+        # futuro seja detectado pelo app — o usuário não vai descobrir
+        # depois abrindo o Excel.
+        cfop_alertas = resultado.get("cfop_alertas", []) or []
+        total_susp = sum(q for _, q in cfop_alertas)
+
+        if total_susp > 0:
+            detalhes = "\n".join(
+                f"  • {arq}: {qtd} linha(s)"
+                for arq, qtd in cfop_alertas[:10]
+            )
+            if len(cfop_alertas) > 10:
+                detalhes += f"\n  ... e mais {len(cfop_alertas)-10} arquivo(s)"
+            self.saida.append(
+                f"⚠️ ATENÇÃO: {total_susp} linhas com CFOP_COD suspeito "
+                f"em {len(cfop_alertas)} arquivo(s):\n{detalhes}"
+            )
+            QMessageBox.warning(
+                self,
+                "Atenção: CFOP_COD com formato inesperado",
+                f"A base foi processada, mas o sistema detectou "
+                f"{total_susp:,} linha(s) onde a coluna CFOP_COD "
+                f"NÃO tem o formato esperado de 4 dígitos.\n\n"
+                f"Isso normalmente indica que alguma linha do TXT do SAP "
+                f"tem um caractere '|' no meio de uma coluna de texto e "
+                f"o corretor automático não conseguiu identificar onde.\n\n"
+                f"Arquivo(s) afetado(s):\n{detalhes}\n\n"
+                f"Recomendação: filtrar a coluna CFOP_COD na base interna "
+                f"antes de exportar e revisar essas linhas manualmente.\n\n"
+                f"Tipo: {resultado['tipo_movimento']} | "
+                f"Total linhas: {resultado['total_linhas']:,}"
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Sucesso",
+                f"Base processada com sucesso.\n\n"
+                f"Tipo detectado: {resultado['tipo_movimento']}\n"
+                f"Linhas: {resultado['total_linhas']:,}\n"
+                f"CFOP_COD: 100% válido (4 dígitos em todas as linhas) ✓\n"
+                f"Base interna: {resultado['parquet_final']}\n"
+                f"Tempo total: {resultado['tempo_total']}s"
+            )
         self.saida.append("Bases internas de conferencia atualizadas: Andersen e Vivo.")
 
     def finalizar_erro(self, erro):

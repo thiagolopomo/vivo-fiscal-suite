@@ -2072,6 +2072,21 @@ def processar_arquivo(args):
 
     df = df.with_columns(pl.lit(path_txt.name).alias("__ordem__"))
 
+    # SAFETY NET: conta linhas onde CFOP_COD final NÃO bate com o pattern
+    # esperado de 4 dígitos. Se o `corrigir_pipe_na_descricao` tiver feito
+    # merge errado (ex.: surgir um terceiro tipo de pipe-extra que ainda
+    # não cobrimos), essas linhas APARECEM aqui — e a UI mostra um aviso
+    # destacado pro usuário antes que ele descubra abrindo o Excel.
+    cfop_suspeitos = 0
+    if "CFOP_COD" in df.columns:
+        cfop_suspeitos = int(
+            df.select(
+                (~pl.col("CFOP_COD").cast(pl.Utf8).fill_null("")
+                  .str.strip_chars().str.contains(r"^\d{4}$", literal=False))
+                .sum()
+            ).item()
+        )
+
     df.write_parquet(
         shard_out,
         compression=COMPRESSION,
@@ -2083,7 +2098,13 @@ def processar_arquivo(args):
     except Exception:
         pass
 
-    return {"arquivo": path_txt.name, "linhas": df.height, "ok": True, "shard": str(shard_out)}
+    return {
+        "arquivo": path_txt.name,
+        "linhas": df.height,
+        "ok": True,
+        "shard": str(shard_out),
+        "cfop_suspeitos": cfop_suspeitos,
+    }
 
 
 def consolidar_final(base_dir_str, progress_callback=None):
@@ -2107,6 +2128,10 @@ def consolidar_final(base_dir_str, progress_callback=None):
     shard_paths = []
     total_linhas = 0
     total_arquivos = len(arquivos)
+    # Safety net: agrega CFOP_COD com formato inesperado (não 4 dígitos),
+    # por arquivo. Se algo passar pela correção, isso aparece no resultado
+    # final e a UI exibe o aviso.
+    cfop_alertas = []  # list of (arquivo, qtd_linhas_suspeitas)
 
     args = [(str(a), str(tmp_dir), tipo_movimento) for a in arquivos]
 
@@ -2126,6 +2151,10 @@ def consolidar_final(base_dir_str, progress_callback=None):
 
         shard_paths.append(res["shard"])
         total_linhas += res["linhas"]
+
+        susp = int(res.get("cfop_suspeitos", 0) or 0)
+        if susp > 0:
+            cfop_alertas.append((res.get("arquivo", "?"), susp))
 
     if not shard_paths:
         raise ValueError("Nenhum shard gerado.")
@@ -2164,4 +2193,21 @@ def consolidar_final(base_dir_str, progress_callback=None):
     if progress_callback:
         progress_callback("finalizado", 1, 1, parquet_final.name)
 
-    return parquet_final, df.height, round(time.time() - t0, 2), tipo_movimento
+    # Se sobrou alguma linha com CFOP_COD suspeito (texto, mais que 4 dígitos,
+    # vazio etc), avisamos via callback ANTES de devolver — assim a UI já
+    # exibe o alerta destacado pro usuário.
+    if cfop_alertas and progress_callback:
+        total_susp = sum(q for _, q in cfop_alertas)
+        n_arq = len(cfop_alertas)
+        progress_callback(
+            "atenção_cfop",
+            total_susp,
+            total_susp,
+            f"⚠️ {total_susp} linhas com CFOP_COD suspeito em {n_arq} arquivo(s) — "
+            f"verifique a base consolidada antes de exportar.",
+        )
+
+    return (
+        parquet_final, df.height, round(time.time() - t0, 2),
+        tipo_movimento, cfop_alertas,
+    )
