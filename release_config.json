@@ -1,5 +1,5 @@
 {
-    "version":  "2.3.2",
+    "version":  "2.3.3",
     "notes":  "fix CRITICO Consolidador Fiscal: shift de colunas no Saida (CFOP_COD vinha com texto tipo PEW1 quando o INFSM_DSC tinha pipe literal). Merge agora usa CFOP_COD como arbitro: tenta DSC primeiro, valida CFOP de 4 digitos; senao tenta VAR05. Cobre Entrada e Saida sem chute fixo.",
     "mandatory":  true,
     "repo_owner":  "thiagolopomo",

@@ -1,7 +1,7 @@
 {
-  "version": "2.3.2",
+  "version": "2.3.3",
   "mandatory": true,
   "notes": "fix CRITICO Consolidador Fiscal: shift de colunas no Saida (CFOP_COD vinha com texto tipo PEW1 quando o INFSM_DSC tinha pipe literal). Merge agora usa CFOP_COD como arbitro: tenta DSC primeiro, valida CFOP de 4 digitos; senao tenta VAR05. Cobre Entrada e Saida sem chute fixo.",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.3.2/package.zip",
-  "sha256": "5d470b1e69e87bc2a6176076cfea61a40675a24c3e564899760e4767b1c05c35"
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.3.3/package.zip",
+  "sha256": "d33cbdc4975b00e7697dc2b1c0ec08e3609a042d5b16c9f4d3372fdf47b10809"
 }
