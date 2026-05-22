@@ -1,7 +1,7 @@
 {
   "version": "2.3.4",
   "mandatory": true,
-  "notes": "fix CRITICO Consolidador Fiscal: shift de colunas no Saida (CFOP_COD vinha com texto tipo PEW1 quando o INFSM_DSC tinha pipe literal). Merge agora usa CFOP_COD como arbitro: tenta DSC primeiro, valida CFOP de 4 digitos; senao tenta VAR05. Cobre Entrada e Saida sem chute fixo.",
+  "notes": "fix CRITICO Consolidador Fiscal: parsing por LARGURA FIXA (era split por '|'). Os TXTs SAP sao fixed-width; pipes embutidos em campos de texto (DSC, VAR05, RAZAO_SOCIAL) confundiam o split antigo e shiftavam colunas, fazendo CFOP_COD virar QTD (valores tipo 1000, 5000) — e a validacao 4-digitos do safety net nao pegava. Agora usa a linha de tracejados como mapa de larguras: imune a qualquer '|' literal em qualquer campo. 0 alertas em 241.950 linhas de teste.",
   "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.3.4/package.zip",
   "sha256": "de9804743971a159bb9582e73a03fde4434d40ed6681dfbb84e2336bf9dac03f"
 }
