@@ -411,6 +411,63 @@ def detectar_header(path):
     return None, None
 
 
+def detectar_header_e_widths(path):
+    """Lê o header e tenta extrair as larguras das colunas a partir da linha
+    de tracejados imediatamente abaixo do header (formato `---|---|---`).
+
+    Retorna (header_line, header_raw, widths) onde:
+      - widths é uma lista de inteiros (uma largura por coluna) se a linha
+        de tracejados existir e tiver o mesmo número de campos do header
+      - widths é None se a linha de tracejados não puder ser identificada
+        (caímos no parser antigo baseado em split por '|')
+
+    O parsing por LARGURA FIXA é o único 100% confiável quando campos de
+    texto contêm '|' literal — o split por '|' shifta colunas e foi a
+    origem dos bugs históricos de CFOP_COD com valores tipo 'PEW1', '1000', etc.
+    """
+    with open(path, "r", encoding="latin-1", errors="ignore") as f:
+        linhas = []
+        for i, linha in enumerate(f):
+            up = linha.upper()
+            if "|" in linha and ("CHAVE DA NOTA" in up or "MNFSM_CHV_NFE" in up):
+                header_line = i
+                header_raw = [c.strip() for c in linha.rstrip("\r\n").split("|")]
+                # tenta ler a próxima linha (deve ser '---|---|---')
+                try:
+                    dash = next(f).rstrip("\r\n")
+                except StopIteration:
+                    return header_line, header_raw, None
+                # linha-de-tracejados: só '-' e '|', sem texto
+                if dash and dash.strip("-|") == "" and "|" in dash:
+                    partes = dash.split("|")
+                    if len(partes) == len(header_raw):
+                        widths = [len(p) for p in partes]
+                        return header_line, header_raw, widths
+                return header_line, header_raw, None
+    return None, None, None
+
+
+def parsear_linha_fixed_width(linha, widths):
+    """Fatia uma linha pelos comprimentos de cada coluna. Os '|' visuais
+    funcionam apenas como separadores ENTRE colunas — qualquer '|' literal
+    dentro de um campo é parte do conteúdo do campo (não muda a posição
+    dos campos seguintes, porque os campos são padded a largura fixa).
+
+    Retorna lista com exatamente len(widths) itens.
+    """
+    linha = linha.rstrip("\r\n")
+    cols = []
+    pos = 0
+    n = len(linha)
+    for w in widths:
+        if pos >= n:
+            cols.append("")
+        else:
+            cols.append(linha[pos:pos + w])
+        pos += w + 1  # +1 pelo pipe separador
+    return cols
+
+
 def limpar_nomes_colunas(cols):
     vistos = {}
     saida = []
@@ -1867,7 +1924,7 @@ def exportar_versao_vivo(parquet_path, pasta_destino, tipo_movimento, progress_c
 
 
 def criar_txt_limpo(path_txt, tmp_txt):
-    header_line, header_raw = detectar_header(path_txt)
+    header_line, header_raw, widths = detectar_header_e_widths(path_txt)
     if header_line is None:
         return None, None, 0, None
 
@@ -1919,18 +1976,42 @@ def criar_txt_limpo(path_txt, tmp_txt):
         buf_out = ["|".join(header) + "\n"]
         FLUSH_EVERY = 10_000
 
-        for linha in fin:
-            if linha_eh_lixo(linha):
-                continue
+        # CAMINHO PREFERIDO: parsing por LARGURA FIXA usando a linha-de-
+        # tracejados. Imune a '|' literal em qualquer campo de texto — não
+        # depende de heurística de "onde está o pipe extra". É o único método
+        # 100% confiável e foi o que faltava nos consertos anteriores.
+        if widths is not None:
+            placeholder = PIPE_PLACEHOLDER
+            for linha in fin:
+                if linha_eh_lixo(linha):
+                    continue
 
-            buf_out.append(
-                corrigir_pipe_na_descricao(linha, ncols, candidatos_merge, idx_cfop) + "\n"
-            )
-            kept += 1
+                cols = parsear_linha_fixed_width(linha, widths)
+                # Qualquer '|' embutido no conteúdo do campo precisa virar
+                # placeholder antes de re-serializar com separator='|', se
+                # não o polars vai re-shiftar tudo de novo na leitura.
+                cols_safe = [c.replace("|", placeholder) for c in cols]
+                buf_out.append("|".join(cols_safe) + "\n")
+                kept += 1
 
-            if len(buf_out) >= FLUSH_EVERY:
-                fout.writelines(buf_out)
-                buf_out.clear()
+                if len(buf_out) >= FLUSH_EVERY:
+                    fout.writelines(buf_out)
+                    buf_out.clear()
+        else:
+            # FALLBACK (arquivos sem linha de tracejados): usa a heurística
+            # antiga de merge-por-CFOP. Mantida só pra compatibilidade.
+            for linha in fin:
+                if linha_eh_lixo(linha):
+                    continue
+
+                buf_out.append(
+                    corrigir_pipe_na_descricao(linha, ncols, candidatos_merge, idx_cfop) + "\n"
+                )
+                kept += 1
+
+                if len(buf_out) >= FLUSH_EVERY:
+                    fout.writelines(buf_out)
+                    buf_out.clear()
 
         if buf_out:
             fout.writelines(buf_out)
@@ -1972,19 +2053,14 @@ def processar_arquivo(args):
         quote_char=None,
     )
 
-    # O PIPE_PLACEHOLDER pode ter sido gravado em QUALQUER um dos candidatos
-    # de merge (DSC, VAR05, etc) — depende do que a validação por CFOP
-    # escolheu por linha. Como a operação `replace_all(placeholder, "|")` é
-    # idempotente (não-op em colunas sem placeholder), decodificamos em
-    # TODAS as colunas candidatas pra cobrir os dois casos.
-    if candidatos_merge:
-        idxs = candidatos_merge if isinstance(candidatos_merge, list) else [candidatos_merge]
-        cols_decode = [header[i] for i in idxs if i is not None and i < len(header)]
-        if cols_decode:
-            df = df.with_columns([
-                pl.col(c).str.replace_all(PIPE_PLACEHOLDER, "|").alias(c)
-                for c in cols_decode if c in df.columns
-            ])
+    # No parsing por LARGURA FIXA qualquer campo pode ter '|' literal, então
+    # decodificamos o placeholder em TODAS as colunas string. A operação é
+    # idempotente (no-op em colunas sem placeholder), então é seguro.
+    df = df.with_columns([
+        pl.col(c).str.replace_all(PIPE_PLACEHOLDER, "|").alias(c)
+        for c in df.columns
+        if df.schema[c] == pl.Utf8
+    ])
 
     nome_arquivo = path_txt.name
     divisao_arquivo = extrair_divisao_arquivo(nome_arquivo)
