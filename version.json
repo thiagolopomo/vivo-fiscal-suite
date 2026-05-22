@@ -1,7 +1,7 @@
 {
-  "version": "2.3.3",
+  "version": "2.3.4",
   "mandatory": true,
-  "notes": "Safety net no Consolidador Fiscal: agora detecta automaticamente qualquer linha com CFOP_COD nao-numerico (esperado: 4 digitos) por arquivo e avisa NA HORA via popup, listando os arquivos suspeitos. Garantia de que nenhum shift de colunas vai passar silenciosamente.",
-  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.3.3/package.zip",
-  "sha256": "d33cbdc4975b00e7697dc2b1c0ec08e3609a042d5b16c9f4d3372fdf47b10809"
+  "notes": "fix CRITICO Consolidador Fiscal: shift de colunas no Saida (CFOP_COD vinha com texto tipo PEW1 quando o INFSM_DSC tinha pipe literal). Merge agora usa CFOP_COD como arbitro: tenta DSC primeiro, valida CFOP de 4 digitos; senao tenta VAR05. Cobre Entrada e Saida sem chute fixo.",
+  "url": "https://github.com/thiagolopomo/vivo-fiscal-suite/releases/download/v2.3.4/package.zip",
+  "sha256": "de9804743971a159bb9582e73a03fde4434d40ed6681dfbb84e2336bf9dac03f"
 }
